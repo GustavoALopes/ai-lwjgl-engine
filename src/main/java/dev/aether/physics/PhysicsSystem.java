@@ -1,0 +1,3 @@
+package dev.aether.physics;
+import dev.aether.ecs.*;import dev.aether.math.Vec3;import dev.aether.scene.Transform;
+public final class PhysicsSystem implements WorldSystem { private final Vec3 gravity; public PhysicsSystem(){this(new Vec3(0,-9.81,0));} public PhysicsSystem(Vec3 g){gravity=g;} public void update(World w,double dt){for(var x:w.view(RigidBody.class).entrySet()){Entity e=x.getKey();RigidBody b=x.getValue();Transform t=w.get(e,Transform.class).orElse(null);if(t==null)continue;Vec3 v=b.useGravity()?b.velocity().add(gravity.multiply(dt)):b.velocity();w.add(e,b.withVelocity(v));w.add(e,t.withPosition(t.position().add(v.multiply(dt))));}} }
