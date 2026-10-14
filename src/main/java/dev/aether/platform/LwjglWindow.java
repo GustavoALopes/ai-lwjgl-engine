@@ -31,6 +31,7 @@ public final class LwjglWindow implements AutoCloseable {
     public boolean shouldClose() { return glfwWindowShouldClose(handle); }
     public void pollEvents() { glfwPollEvents(); }
     public void present() { glfwSwapBuffers(handle); }
+    public void requestClose() { glfwSetWindowShouldClose(handle, true); }
     public long handle() { return handle; }
 
     @Override public void close() {

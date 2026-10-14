@@ -9,6 +9,8 @@ Aether is a Java 25 game-engine foundation with a deterministic, headless-testab
 - Script lifecycle API (`onCreate`, `onUpdate`, `onDestroy`); the host is deliberately language-neutral for the future Lua adapter.
 - Explicit engine state machine and headless launch path suited to automated editor agents.
 - Render-feature contract for HDR, SSAO, soft shadows, and IBL; OpenGL backend work can be built without coupling it to core tests.
+- ImGui editor shell with File/Game/View/Help menus, hierarchy, Inspector, Scene View, Asset Browser, and Console panels.
+- A deterministic integrated showcase scene: physics playground, PBR renderer metadata, scripting sandbox, and spatial-audio declaration.
 
 ## Build
 
@@ -19,3 +21,5 @@ mvn test
 ```
 
 The repository targets Java 25. `dev.aether.Main` is intentionally headless at this stage, so it is safe to use in CI.
+
+Run `dev.aether.Main` without arguments to open the editor. Use `--headless` for CI. The menu and panel controls are editor-facing views over the same public ECS APIs used by automation.
