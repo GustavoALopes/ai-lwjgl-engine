@@ -21,7 +21,9 @@ public final class DemoScenes {
         Entity cube = world.create("Renderer Showcase / PBR Cube");
         world.add(cube, new Transform(new Vec3(-2, 2, 0), Vec3.ZERO, new Vec3(1, 1, 1)));
         world.add(cube, new MeshRenderer("primitive/cube", "pbr/metallic-blue"));
-        world.add(cube, new RigidBody(1, Vec3.ZERO, true));
+        // Collision is intentionally not introduced until its full broadphase/narrowphase contract exists;
+        // keep the showcase body static so the default editor scene remains inspectable indefinitely.
+        world.add(cube, new RigidBody(1, Vec3.ZERO, false));
         Entity spinner = world.create("Scripting Sandbox / Spinner");
         world.add(spinner, new Transform(new Vec3(2, 0, 0), Vec3.ZERO, new Vec3(1, 1, 1)));
         world.add(spinner, new MeshRenderer("primitive/sphere", "pbr/emissive-orange"));
