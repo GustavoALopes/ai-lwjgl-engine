@@ -33,6 +33,12 @@ public final class LwjglWindow implements AutoCloseable {
     public void present() { glfwSwapBuffers(handle); }
     public void requestClose() { glfwSetWindowShouldClose(handle, true); }
     public long handle() { return handle; }
+    /** Returns the current cursor position in window coordinates. */
+    public CursorPosition cursorPosition() { double[] x = new double[1], y = new double[1]; glfwGetCursorPos(handle, x, y); return new CursorPosition(x[0], y[0]); }
+    public boolean isMouseButtonDown(int button) { return glfwGetMouseButton(handle, button) == GLFW_PRESS; }
+    public boolean isKeyDown(int key) { return glfwGetKey(handle, key) == GLFW_PRESS; }
+
+    public record CursorPosition(double x, double y) { }
 
     @Override public void close() {
         if (closed) return;
