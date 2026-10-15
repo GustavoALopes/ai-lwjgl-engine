@@ -14,6 +14,14 @@ import java.util.List;
 /** Canonical scene for CI and the editor: it deliberately covers each public component family. */
 public final class DemoScenes {
     private DemoScenes() { }
+
+    /** Replaces the world's visible entities with the editor's default cube showcase. */
+    public static List<Entity> resetToShowcase(World world) {
+        java.util.Objects.requireNonNull(world, "world");
+        world.entities().forEach(world::destroy);
+        return populateShowcase(world);
+    }
+
     public static List<Entity> populateShowcase(World world) {
         Entity floor = world.create("Physics Playground / Ground");
         world.add(floor, new Transform(new Vec3(0, -2, 0), Vec3.ZERO, new Vec3(12, 1, 12)));

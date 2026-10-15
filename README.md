@@ -8,7 +8,7 @@ Aether is a Java 25 game-engine foundation with a deterministic, headless-testab
 - Transform and rigid-body components with deterministic gravity integration.
 - Script lifecycle API (`onCreate`, `onUpdate`, `onDestroy`); the host is deliberately language-neutral for the future Lua adapter.
 - Explicit engine state machine and headless launch path suited to automated editor agents.
-- Render-feature contract for HDR, SSAO, soft shadows, and IBL; OpenGL backend work can be built without coupling it to core tests.
+- Render-feature contract for HDR, SSAO, soft shadows, and IBL, plus an editor **Game → Open Render Feature Lab** scene. The OpenGL adapter renders an HDR framebuffer with exposure tone mapping, environment lighting, soft contact shadows, and SSAO-style contact occlusion without coupling core tests to OpenGL.
 - ImGui editor shell with File/Game/View/Help menus, hierarchy, Inspector, Scene View, Asset Browser, and Console panels.
 - A deterministic integrated showcase scene: physics playground, PBR renderer metadata, scripting sandbox, and spatial-audio declaration.
 

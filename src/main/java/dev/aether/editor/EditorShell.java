@@ -2,6 +2,7 @@ package dev.aether.editor;
 
 import dev.aether.core.AetherEngine;
 import dev.aether.demo.DemoScenes;
+import dev.aether.demo.RenderFeatureScene;
 import dev.aether.demo.TetrisDemo;
 import dev.aether.demo.TetrisScene;
 import dev.aether.ecs.Entity;
@@ -56,8 +57,10 @@ public final class EditorShell implements AutoCloseable {
     private boolean middleNavigating;
     private boolean leftNavigating;
     private TetrisScene tetrisScene;
+    private boolean tetrisSceneOpen;
     private final Set<Integer> heldTetrisKeys = new LinkedHashSet<>();
     private boolean openSceneShortcutHeld;
+    private boolean newSceneShortcutHeld;
     public EditorShell(LwjglWindow window, AetherEngine engine, OpenGlRenderer renderer) {
         this.renderer = renderer;
         ImGui.createContext();
@@ -73,8 +76,8 @@ public final class EditorShell implements AutoCloseable {
     }
     private void drawMenu(LwjglWindow window, AetherEngine engine) {
         if (ImGui.beginMainMenuBar()) {
-            if (ImGui.beginMenu("File")) { ImGui.menuItem("New Scene", "Ctrl+N"); if(ImGui.menuItem("Open Scene...", "Ctrl+O"))openTetrisScene(engine.world()); ImGui.menuItem("Save Scene", "Ctrl+S"); ImGui.separator(); if (ImGui.menuItem("Quit")) window.requestClose(); ImGui.endMenu(); }
-            if (ImGui.beginMenu("Game")) { boolean running = engine.state() == AetherEngine.State.RUNNING; ImGui.menuItem(running ? "Play (running)" : "Play", "F5", running, false); ImGui.menuItem("Pause", "F6", false, false); ImGui.separator(); if(ImGui.menuItem("Open Tetris Demo", "Ctrl+O"))openTetrisScene(engine.world()); ImGui.endMenu(); }
+            if (ImGui.beginMenu("File")) { if(ImGui.menuItem("New Scene", "Ctrl+N"))openCubeScene(engine.world()); if(ImGui.menuItem("Open Scene...", "Ctrl+O"))openTetrisScene(engine.world()); ImGui.menuItem("Save Scene", "Ctrl+S"); ImGui.separator(); if (ImGui.menuItem("Quit")) window.requestClose(); ImGui.endMenu(); }
+            if (ImGui.beginMenu("Game")) { boolean running = engine.state() == AetherEngine.State.RUNNING; ImGui.menuItem(running ? "Play (running)" : "Play", "F5", running, false); ImGui.menuItem("Pause", "F6", false, false); ImGui.separator(); if(ImGui.menuItem("Open Render Feature Lab"))openRenderFeatureScene(engine.world()); if(ImGui.menuItem("Open Tetris Demo", "Ctrl+O"))openTetrisScene(engine.world()); ImGui.endMenu(); }
             if (ImGui.beginMenu("View")) { showDemo = ImGui.menuItem("Demo Guide", null, showDemo); ImGui.menuItem("Scene Hierarchy", null, true, false); ImGui.menuItem("Inspector", null, true, false); ImGui.endMenu(); }
             if (ImGui.beginMenu("Help")) { ImGui.menuItem("Aether Engine 0.1.0"); ImGui.menuItem("Keyboard Shortcuts"); ImGui.endMenu(); }
             ImGui.endMainMenuBar();
@@ -83,17 +86,33 @@ public final class EditorShell implements AutoCloseable {
     private void openTetrisScene(World world) {
         if (tetrisScene == null) tetrisScene = new TetrisScene(new TetrisDemo(0L));
         tetrisScene.open(world);
+        tetrisSceneOpen = true;
         selected = null;
         sceneViewMode = SceneViewMode.TWO_D;
     }
+    private void openCubeScene(World world) {
+        DemoScenes.resetToShowcase(world);
+        tetrisSceneOpen = false;
+        selected = null;
+        sceneViewMode = SceneViewMode.THREE_D;
+    }
+    private void openRenderFeatureScene(World world) {
+        RenderFeatureScene.open(world);
+        tetrisSceneOpen = false;
+        selected = null;
+        sceneViewMode = SceneViewMode.THREE_D;
+    }
     private void handleOpenSceneShortcut(LwjglWindow window, AetherEngine engine) {
         boolean controlDown = window.isKeyDown(GLFW_KEY_LEFT_CONTROL) || window.isKeyDown(GLFW_KEY_RIGHT_CONTROL);
-        boolean shortcutDown = controlDown && window.isKeyDown(GLFW_KEY_O);
-        if (shortcutDown && !openSceneShortcutHeld) openTetrisScene(engine.world());
-        openSceneShortcutHeld = shortcutDown;
+        boolean openShortcutDown = controlDown && window.isKeyDown(GLFW_KEY_O);
+        boolean newShortcutDown = controlDown && window.isKeyDown(GLFW_KEY_N);
+        if (openShortcutDown && !openSceneShortcutHeld) openTetrisScene(engine.world());
+        if (newShortcutDown && !newSceneShortcutHeld) openCubeScene(engine.world());
+        openSceneShortcutHeld = openShortcutDown;
+        newSceneShortcutHeld = newShortcutDown;
     }
     private void handleTetrisInput(LwjglWindow window, World world) {
-        if (tetrisScene == null) return;
+        if (!tetrisSceneOpen) return;
         TetrisDemo game = tetrisScene.game();
         if (pressed(window, GLFW_KEY_LEFT)) game.moveLeft();
         if (pressed(window, GLFW_KEY_RIGHT)) game.moveRight();
@@ -113,7 +132,7 @@ public final class EditorShell implements AutoCloseable {
     private String objectType(World world){if(world.get(selected,MeshRenderer.class).isPresent())return "Mesh Object";if(world.get(selected,ScriptComponent.class).isPresent())return "Scripted Entity";return "Entity";}
     private static Set<String> parseTags(String source){LinkedHashSet<String> tags=new LinkedHashSet<>();Arrays.stream(source.split(",")).map(String::trim).filter(value->!value.isEmpty()).forEach(tags::add);return tags;}
     private static final class EditorScript implements Script { }
-    private void drawViewport(LwjglWindow window,World world) { ImGui.setNextWindowPos(306, 28, ImGuiCond.Always); ImGui.setNextWindowSize(920, 798, ImGuiCond.Always); ImGui.begin("Scene View", ImGuiWindowFlags.NoScrollbar|editorPanelFlags()); if(ImGui.button("3D",sceneViewMode==SceneViewMode.THREE_D?58:48,0))sceneViewMode=SceneViewMode.THREE_D; ImGui.sameLine(); if(ImGui.button("2D",sceneViewMode==SceneViewMode.TWO_D?58:48,0))sceneViewMode=SceneViewMode.TWO_D; ImGui.sameLine(); ImGui.textDisabled(sceneViewMode==SceneViewMode.THREE_D?"Perspective":"Orthographic"); ImGui.separator(); float viewportWidth=ImGui.getContentRegionAvailX(), viewportHeight=ImGui.getContentRegionAvailY()-28; Matrix4f projection=projection(viewportWidth,viewportHeight); int texture=renderer.renderScene(world,Math.max(1,(int)viewportWidth),Math.max(1,(int)viewportHeight),projection,viewMatrix()); ImGui.image(texture,viewportWidth,viewportHeight,0,1,1,0); float left=ImGui.getItemRectMinX(), top=ImGui.getItemRectMinY(); boolean hovered=ImGui.isItemHovered(); navigateViewport(window,hovered); if(hovered&&ImGui.isMouseClicked(0)&&!window.isKeyDown(GLFW_KEY_LEFT_ALT)&&!window.isKeyDown(GLFW_KEY_RIGHT_ALT)){Entity hit=pick(world,left,top,viewportWidth,viewportHeight,ImGui.getMousePosX(),ImGui.getMousePosY());if(hit!=null)selected=hit;} drawGizmo(world,left,top,viewportWidth,viewportHeight); if(tetrisScene!=null){TetrisDemo.Snapshot game=tetrisScene.game().snapshot();drawTetrisHud(left,top,viewportWidth,viewportHeight,game);ImGui.textColored(.35f,.9f,1f,1f,"Arrows move/rotate | Space hard drop | R restart");}else ImGui.textColored(.35f,.75f,1f,1f,sceneViewMode==SceneViewMode.THREE_D?"Navigate: RMB + WASD/QE fly | Alt + LMB orbit | MMB pan | wheel zoom":"2D orthographic view: MMB pan | wheel zoom"); ImGui.end(); }
+    private void drawViewport(LwjglWindow window,World world) { ImGui.setNextWindowPos(306, 28, ImGuiCond.Always); ImGui.setNextWindowSize(920, 798, ImGuiCond.Always); ImGui.begin("Scene View", ImGuiWindowFlags.NoScrollbar|editorPanelFlags()); if(ImGui.button("3D",sceneViewMode==SceneViewMode.THREE_D?58:48,0))sceneViewMode=SceneViewMode.THREE_D; ImGui.sameLine(); if(ImGui.button("2D",sceneViewMode==SceneViewMode.TWO_D?58:48,0))sceneViewMode=SceneViewMode.TWO_D; ImGui.sameLine(); ImGui.textDisabled(sceneViewMode==SceneViewMode.THREE_D?"Perspective":"Orthographic"); ImGui.separator(); float viewportWidth=ImGui.getContentRegionAvailX(), viewportHeight=ImGui.getContentRegionAvailY()-28; Matrix4f projection=projection(viewportWidth,viewportHeight); int texture=renderer.renderScene(world,Math.max(1,(int)viewportWidth),Math.max(1,(int)viewportHeight),projection,viewMatrix()); ImGui.image(texture,viewportWidth,viewportHeight,0,1,1,0); float left=ImGui.getItemRectMinX(), top=ImGui.getItemRectMinY(); boolean hovered=ImGui.isItemHovered(); navigateViewport(window,hovered); if(hovered&&ImGui.isMouseClicked(0)&&!window.isKeyDown(GLFW_KEY_LEFT_ALT)&&!window.isKeyDown(GLFW_KEY_RIGHT_ALT)){Entity hit=pick(world,left,top,viewportWidth,viewportHeight,ImGui.getMousePosX(),ImGui.getMousePosY());if(hit!=null)selected=hit;} drawGizmo(world,left,top,viewportWidth,viewportHeight); if(tetrisSceneOpen){TetrisDemo.Snapshot game=tetrisScene.game().snapshot();drawTetrisHud(left,top,viewportWidth,viewportHeight,game);ImGui.textColored(.35f,.9f,1f,1f,"Arrows move/rotate | Space hard drop | R restart");}else ImGui.textColored(.35f,.75f,1f,1f,sceneViewMode==SceneViewMode.THREE_D?"Navigate: RMB + WASD/QE fly | Alt + LMB orbit | MMB pan | wheel zoom":"2D orthographic view: MMB pan | wheel zoom"); ImGui.end(); }
     private void drawTetrisHud(float left,float top,float width,float height,TetrisDemo.Snapshot game){ImDrawList draw=ImGui.getWindowDrawList();float leftPanel=left+width*.055f,rightPanel=left+width*.73f,y=top+height*.18f;int label=0xFFE5EDF5,value=0xFFFFFFFF,accent=0xFFFFE04A;draw.addText(leftPanel,y,label,"LINES");draw.addText(leftPanel,y+25,accent,Integer.toString(game.lines()));draw.addText(rightPanel,y,label,"TIME");draw.addText(rightPanel,y+25,value,String.format("%02d:%02d",(int)game.elapsedSeconds()/60,(int)game.elapsedSeconds()%60));draw.addText(rightPanel,y+78,label,"SCORE");draw.addText(rightPanel,y+103,value,Integer.toString(game.score()));draw.addText(rightPanel,y+156,label,"TOTAL SCORE");draw.addText(rightPanel,y+181,accent,Integer.toString(game.totalScore()));}
     private void navigateViewport(LwjglWindow window,boolean hovered){LwjglWindow.CursorPosition mouse=window.cursorPosition();double dx=hasPreviousSceneMouse?mouse.x()-previousSceneMouseX:0,dy=hasPreviousSceneMouse?mouse.y()-previousSceneMouseY:0;previousSceneMouseX=mouse.x();previousSceneMouseY=mouse.y();hasPreviousSceneMouse=true;boolean right=window.isMouseButtonDown(GLFW_MOUSE_BUTTON_RIGHT),middle=window.isMouseButtonDown(GLFW_MOUSE_BUTTON_MIDDLE),left=window.isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT),alt=window.isKeyDown(GLFW_KEY_LEFT_ALT)||window.isKeyDown(GLFW_KEY_RIGHT_ALT);if(!right)rightNavigating=false;if(!middle)middleNavigating=false;if(!left)leftNavigating=false;if(hovered&&right)rightNavigating=true;if(hovered&&middle)middleNavigating=true;if(hovered&&left&&alt)leftNavigating=true;if(sceneViewMode==SceneViewMode.TWO_D){if(middleNavigating)sceneCamera.panOrthographic(-dx*.02,dy*.02);}else{if(rightNavigating){sceneCamera.orbit(-dx*.01,dy*.01);double speed=window.isKeyDown(GLFW_KEY_LEFT_SHIFT)||window.isKeyDown(GLFW_KEY_RIGHT_SHIFT)?.25:.08;if(window.isKeyDown(GLFW_KEY_W))sceneCamera.fly(0,0,speed);if(window.isKeyDown(GLFW_KEY_S))sceneCamera.fly(0,0,-speed);if(window.isKeyDown(GLFW_KEY_A))sceneCamera.fly(-speed,0,0);if(window.isKeyDown(GLFW_KEY_D))sceneCamera.fly(speed,0,0);if(window.isKeyDown(GLFW_KEY_Q))sceneCamera.fly(0,-speed,0);if(window.isKeyDown(GLFW_KEY_E))sceneCamera.fly(0,speed,0);}if(leftNavigating)sceneCamera.orbit(-dx*.01,dy*.01);if(middleNavigating)sceneCamera.pan(-dx*.02,dy*.02);}float wheel=ImGui.getIO().getMouseWheel();if(hovered&&wheel!=0)sceneCamera.dolly(wheel*Math.max(.1,distanceToFocus()*.12));}
     private double distanceToFocus(){Vec3 p=sceneCamera.position(),t=sceneCamera.target();double x=p.x()-t.x(),y=p.y()-t.y(),z=p.z()-t.z();return Math.sqrt(x*x+y*y+z*z);}
