@@ -2,6 +2,8 @@ package dev.aether.editor;
 
 import dev.aether.core.AetherEngine;
 import dev.aether.demo.DemoScenes;
+import dev.aether.demo.TetrisDemo;
+import dev.aether.demo.TetrisScene;
 import dev.aether.ecs.Entity;
 import dev.aether.ecs.World;
 import dev.aether.math.Vec3;
@@ -53,6 +55,9 @@ public final class EditorShell implements AutoCloseable {
     private boolean rightNavigating;
     private boolean middleNavigating;
     private boolean leftNavigating;
+    private TetrisScene tetrisScene;
+    private final Set<Integer> heldTetrisKeys = new LinkedHashSet<>();
+    private boolean openSceneShortcutHeld;
     public EditorShell(LwjglWindow window, AetherEngine engine, OpenGlRenderer renderer) {
         this.renderer = renderer;
         ImGui.createContext();
@@ -63,17 +68,44 @@ public final class EditorShell implements AutoCloseable {
     }
     public void render(LwjglWindow window, AetherEngine engine) {
         glfw.newFrame(); ImGui.newFrame();
-        drawMenu(window, engine); drawHierarchy(engine.world()); drawInspector(engine.world()); drawViewport(window,engine.world()); drawAssets(); drawConsole(engine.world());
+        handleOpenSceneShortcut(window, engine); drawMenu(window, engine); handleTetrisInput(window, engine.world()); drawHierarchy(engine.world()); drawInspector(engine.world()); drawViewport(window,engine.world()); drawAssets(); drawConsole(engine.world());
         ImGui.render(); gl3.renderDrawData(ImGui.getDrawData());
     }
     private void drawMenu(LwjglWindow window, AetherEngine engine) {
         if (ImGui.beginMainMenuBar()) {
-            if (ImGui.beginMenu("File")) { ImGui.menuItem("New Scene", "Ctrl+N"); ImGui.menuItem("Open Scene...", "Ctrl+O"); ImGui.menuItem("Save Scene", "Ctrl+S"); ImGui.separator(); if (ImGui.menuItem("Quit")) window.requestClose(); ImGui.endMenu(); }
-            if (ImGui.beginMenu("Game")) { boolean running = engine.state() == AetherEngine.State.RUNNING; ImGui.menuItem(running ? "Play (running)" : "Play", "F5", running, false); ImGui.menuItem("Pause", "F6", false, false); ImGui.endMenu(); }
+            if (ImGui.beginMenu("File")) { ImGui.menuItem("New Scene", "Ctrl+N"); if(ImGui.menuItem("Open Scene...", "Ctrl+O"))openTetrisScene(engine.world()); ImGui.menuItem("Save Scene", "Ctrl+S"); ImGui.separator(); if (ImGui.menuItem("Quit")) window.requestClose(); ImGui.endMenu(); }
+            if (ImGui.beginMenu("Game")) { boolean running = engine.state() == AetherEngine.State.RUNNING; ImGui.menuItem(running ? "Play (running)" : "Play", "F5", running, false); ImGui.menuItem("Pause", "F6", false, false); ImGui.separator(); if(ImGui.menuItem("Open Tetris Demo", "Ctrl+O"))openTetrisScene(engine.world()); ImGui.endMenu(); }
             if (ImGui.beginMenu("View")) { showDemo = ImGui.menuItem("Demo Guide", null, showDemo); ImGui.menuItem("Scene Hierarchy", null, true, false); ImGui.menuItem("Inspector", null, true, false); ImGui.endMenu(); }
             if (ImGui.beginMenu("Help")) { ImGui.menuItem("Aether Engine 0.1.0"); ImGui.menuItem("Keyboard Shortcuts"); ImGui.endMenu(); }
             ImGui.endMainMenuBar();
         }
+    }
+    private void openTetrisScene(World world) {
+        if (tetrisScene == null) tetrisScene = new TetrisScene(new TetrisDemo(0L));
+        tetrisScene.open(world);
+        selected = null;
+        sceneViewMode = SceneViewMode.TWO_D;
+    }
+    private void handleOpenSceneShortcut(LwjglWindow window, AetherEngine engine) {
+        boolean controlDown = window.isKeyDown(GLFW_KEY_LEFT_CONTROL) || window.isKeyDown(GLFW_KEY_RIGHT_CONTROL);
+        boolean shortcutDown = controlDown && window.isKeyDown(GLFW_KEY_O);
+        if (shortcutDown && !openSceneShortcutHeld) openTetrisScene(engine.world());
+        openSceneShortcutHeld = shortcutDown;
+    }
+    private void handleTetrisInput(LwjglWindow window, World world) {
+        if (tetrisScene == null) return;
+        TetrisDemo game = tetrisScene.game();
+        if (pressed(window, GLFW_KEY_LEFT)) game.moveLeft();
+        if (pressed(window, GLFW_KEY_RIGHT)) game.moveRight();
+        if (pressed(window, GLFW_KEY_UP)) game.rotateClockwise();
+        if (pressed(window, GLFW_KEY_DOWN)) game.softDrop();
+        if (pressed(window, GLFW_KEY_SPACE)) game.hardDrop();
+        if (pressed(window, GLFW_KEY_R)) tetrisScene.open(world);
+    }
+    private boolean pressed(LwjglWindow window, int key) {
+        boolean down = window.isKeyDown(key);
+        if (!down) { heldTetrisKeys.remove(key); return false; }
+        return heldTetrisKeys.add(key);
     }
     private void drawHierarchy(World world) { ImGui.setNextWindowPos(8, 28, ImGuiCond.Always); ImGui.setNextWindowSize(290, 480, ImGuiCond.Always); ImGui.begin("Scene Hierarchy",editorPanelFlags()); if(ImGui.button("+ Create Cube")){Entity entity=world.create("User Cube");world.add(entity,Transform.identity());world.add(entity,new MeshRenderer("primitive/cube","pbr/metallic-blue"));selected=entity;} ImGui.sameLine(); if(selected!=null&&ImGui.button("Delete")&&world.exists(selected)){world.destroy(selected);selected=null;} ImGui.separator(); for (Entity entity : world.entities()) { boolean active = entity.equals(selected); if (ImGui.selectable(world.nameOf(entity), active, ImGuiTreeNodeFlags.SpanAvailWidth)) selected = entity; } ImGui.end(); }
     private void drawInspector(World world) { ImGui.setNextWindowPos(8, 516, ImGuiCond.Always); ImGui.setNextWindowSize(290, 310, ImGuiCond.Always); ImGui.begin("Inspector",editorPanelFlags()); if (selected == null || !world.exists(selected)) { ImGui.textDisabled("Select an object in Scene View or Scene Hierarchy."); } else { syncInspectorFields(world); ImGui.textDisabled("Type: " + objectType(world)); if(ImGui.inputText("Name",inspectorName) && !inspectorName.get().isBlank()) world.rename(selected,inspectorName.get()); if(ImGui.inputText("Tags (comma separated)",inspectorTags)) world.add(selected,new Tags(parseTags(inspectorTags.get()))); ImGui.separator(); if(ImGui.button("Move"))transformMode=TransformMode.TRANSLATE; ImGui.sameLine(); if(ImGui.button("Scale"))transformMode=TransformMode.SCALE; ImGui.sameLine(); ImGui.textDisabled("Active: "+transformMode.label); world.get(selected, Transform.class).ifPresent(transform -> { float[] position={(float)transform.position().x(),(float)transform.position().y(),(float)transform.position().z()}; if(ImGui.dragFloat3("Position",position,.05f)) world.add(selected,transform.withPosition(new dev.aether.math.Vec3(position[0],position[1],position[2]))); float[] scale={(float)transform.scale().x(),(float)transform.scale().y(),(float)transform.scale().z()}; if(ImGui.dragFloat3("Scale",scale,.02f,.05f,100f))world.add(selected,transform.withScale(new Vec3(scale[0],scale[1],scale[2]))); ImGui.text("Transform Gizmo: "+transformMode.label); }); world.get(selected, MeshRenderer.class).ifPresent(mesh -> { ImGui.separator(); ImGui.text("Mesh: " + mesh.meshId()); ImGui.text("Material: " + mesh.materialId()); }); ImGui.separator(); ScriptComponent script=world.get(selected,ScriptComponent.class).orElse(null); if(script==null){if(ImGui.button("Add Script Component"))world.add(selected,new ScriptComponent(new EditorScript()));}else ImGui.text("Script: " + script.script().getClass().getSimpleName()); ImGui.textDisabled("Components: " + world.componentsOf(selected).stream().map(component->component.getClass().getSimpleName()).reduce((a,b)->a+", "+b).orElse("None")); } ImGui.end(); }
@@ -81,7 +113,8 @@ public final class EditorShell implements AutoCloseable {
     private String objectType(World world){if(world.get(selected,MeshRenderer.class).isPresent())return "Mesh Object";if(world.get(selected,ScriptComponent.class).isPresent())return "Scripted Entity";return "Entity";}
     private static Set<String> parseTags(String source){LinkedHashSet<String> tags=new LinkedHashSet<>();Arrays.stream(source.split(",")).map(String::trim).filter(value->!value.isEmpty()).forEach(tags::add);return tags;}
     private static final class EditorScript implements Script { }
-    private void drawViewport(LwjglWindow window,World world) { ImGui.setNextWindowPos(306, 28, ImGuiCond.Always); ImGui.setNextWindowSize(920, 798, ImGuiCond.Always); ImGui.begin("Scene View", ImGuiWindowFlags.NoScrollbar|editorPanelFlags()); if(ImGui.button("3D",sceneViewMode==SceneViewMode.THREE_D?58:48,0))sceneViewMode=SceneViewMode.THREE_D; ImGui.sameLine(); if(ImGui.button("2D",sceneViewMode==SceneViewMode.TWO_D?58:48,0))sceneViewMode=SceneViewMode.TWO_D; ImGui.sameLine(); ImGui.textDisabled(sceneViewMode==SceneViewMode.THREE_D?"Perspective":"Orthographic"); ImGui.separator(); float viewportWidth=ImGui.getContentRegionAvailX(), viewportHeight=ImGui.getContentRegionAvailY()-28; Matrix4f projection=projection(viewportWidth,viewportHeight); int texture=renderer.renderScene(world,Math.max(1,(int)viewportWidth),Math.max(1,(int)viewportHeight),projection,viewMatrix()); ImGui.image(texture,viewportWidth,viewportHeight,0,1,1,0); float left=ImGui.getItemRectMinX(), top=ImGui.getItemRectMinY(); boolean hovered=ImGui.isItemHovered(); navigateViewport(window,hovered); if(hovered&&ImGui.isMouseClicked(0)&&!window.isKeyDown(GLFW_KEY_LEFT_ALT)&&!window.isKeyDown(GLFW_KEY_RIGHT_ALT)){Entity hit=pick(world,left,top,viewportWidth,viewportHeight,ImGui.getMousePosX(),ImGui.getMousePosY());if(hit!=null)selected=hit;} drawGizmo(world,left,top,viewportWidth,viewportHeight); ImGui.textColored(.35f,.75f,1f,1f,sceneViewMode==SceneViewMode.THREE_D?"Navigate: RMB + WASD/QE fly | Alt + LMB orbit | MMB pan | wheel zoom":"2D orthographic view: MMB pan | wheel zoom"); ImGui.end(); }
+    private void drawViewport(LwjglWindow window,World world) { ImGui.setNextWindowPos(306, 28, ImGuiCond.Always); ImGui.setNextWindowSize(920, 798, ImGuiCond.Always); ImGui.begin("Scene View", ImGuiWindowFlags.NoScrollbar|editorPanelFlags()); if(ImGui.button("3D",sceneViewMode==SceneViewMode.THREE_D?58:48,0))sceneViewMode=SceneViewMode.THREE_D; ImGui.sameLine(); if(ImGui.button("2D",sceneViewMode==SceneViewMode.TWO_D?58:48,0))sceneViewMode=SceneViewMode.TWO_D; ImGui.sameLine(); ImGui.textDisabled(sceneViewMode==SceneViewMode.THREE_D?"Perspective":"Orthographic"); ImGui.separator(); float viewportWidth=ImGui.getContentRegionAvailX(), viewportHeight=ImGui.getContentRegionAvailY()-28; Matrix4f projection=projection(viewportWidth,viewportHeight); int texture=renderer.renderScene(world,Math.max(1,(int)viewportWidth),Math.max(1,(int)viewportHeight),projection,viewMatrix()); ImGui.image(texture,viewportWidth,viewportHeight,0,1,1,0); float left=ImGui.getItemRectMinX(), top=ImGui.getItemRectMinY(); boolean hovered=ImGui.isItemHovered(); navigateViewport(window,hovered); if(hovered&&ImGui.isMouseClicked(0)&&!window.isKeyDown(GLFW_KEY_LEFT_ALT)&&!window.isKeyDown(GLFW_KEY_RIGHT_ALT)){Entity hit=pick(world,left,top,viewportWidth,viewportHeight,ImGui.getMousePosX(),ImGui.getMousePosY());if(hit!=null)selected=hit;} drawGizmo(world,left,top,viewportWidth,viewportHeight); if(tetrisScene!=null){TetrisDemo.Snapshot game=tetrisScene.game().snapshot();drawTetrisHud(left,top,viewportWidth,viewportHeight,game);ImGui.textColored(.35f,.9f,1f,1f,"Arrows move/rotate | Space hard drop | R restart");}else ImGui.textColored(.35f,.75f,1f,1f,sceneViewMode==SceneViewMode.THREE_D?"Navigate: RMB + WASD/QE fly | Alt + LMB orbit | MMB pan | wheel zoom":"2D orthographic view: MMB pan | wheel zoom"); ImGui.end(); }
+    private void drawTetrisHud(float left,float top,float width,float height,TetrisDemo.Snapshot game){ImDrawList draw=ImGui.getWindowDrawList();float leftPanel=left+width*.055f,rightPanel=left+width*.73f,y=top+height*.18f;int label=0xFFE5EDF5,value=0xFFFFFFFF,accent=0xFFFFE04A;draw.addText(leftPanel,y,label,"LINES");draw.addText(leftPanel,y+25,accent,Integer.toString(game.lines()));draw.addText(rightPanel,y,label,"TIME");draw.addText(rightPanel,y+25,value,String.format("%02d:%02d",(int)game.elapsedSeconds()/60,(int)game.elapsedSeconds()%60));draw.addText(rightPanel,y+78,label,"SCORE");draw.addText(rightPanel,y+103,value,Integer.toString(game.score()));draw.addText(rightPanel,y+156,label,"TOTAL SCORE");draw.addText(rightPanel,y+181,accent,Integer.toString(game.totalScore()));}
     private void navigateViewport(LwjglWindow window,boolean hovered){LwjglWindow.CursorPosition mouse=window.cursorPosition();double dx=hasPreviousSceneMouse?mouse.x()-previousSceneMouseX:0,dy=hasPreviousSceneMouse?mouse.y()-previousSceneMouseY:0;previousSceneMouseX=mouse.x();previousSceneMouseY=mouse.y();hasPreviousSceneMouse=true;boolean right=window.isMouseButtonDown(GLFW_MOUSE_BUTTON_RIGHT),middle=window.isMouseButtonDown(GLFW_MOUSE_BUTTON_MIDDLE),left=window.isMouseButtonDown(GLFW_MOUSE_BUTTON_LEFT),alt=window.isKeyDown(GLFW_KEY_LEFT_ALT)||window.isKeyDown(GLFW_KEY_RIGHT_ALT);if(!right)rightNavigating=false;if(!middle)middleNavigating=false;if(!left)leftNavigating=false;if(hovered&&right)rightNavigating=true;if(hovered&&middle)middleNavigating=true;if(hovered&&left&&alt)leftNavigating=true;if(sceneViewMode==SceneViewMode.TWO_D){if(middleNavigating)sceneCamera.panOrthographic(-dx*.02,dy*.02);}else{if(rightNavigating){sceneCamera.orbit(-dx*.01,dy*.01);double speed=window.isKeyDown(GLFW_KEY_LEFT_SHIFT)||window.isKeyDown(GLFW_KEY_RIGHT_SHIFT)?.25:.08;if(window.isKeyDown(GLFW_KEY_W))sceneCamera.fly(0,0,speed);if(window.isKeyDown(GLFW_KEY_S))sceneCamera.fly(0,0,-speed);if(window.isKeyDown(GLFW_KEY_A))sceneCamera.fly(-speed,0,0);if(window.isKeyDown(GLFW_KEY_D))sceneCamera.fly(speed,0,0);if(window.isKeyDown(GLFW_KEY_Q))sceneCamera.fly(0,-speed,0);if(window.isKeyDown(GLFW_KEY_E))sceneCamera.fly(0,speed,0);}if(leftNavigating)sceneCamera.orbit(-dx*.01,dy*.01);if(middleNavigating)sceneCamera.pan(-dx*.02,dy*.02);}float wheel=ImGui.getIO().getMouseWheel();if(hovered&&wheel!=0)sceneCamera.dolly(wheel*Math.max(.1,distanceToFocus()*.12));}
     private double distanceToFocus(){Vec3 p=sceneCamera.position(),t=sceneCamera.target();double x=p.x()-t.x(),y=p.y()-t.y(),z=p.z()-t.z();return Math.sqrt(x*x+y*y+z*z);}
     private Entity pick(World world,float left,float top,float width,float height,float mouseX,float mouseY){Entity nearest=null;float nearestDistance=Float.MAX_VALUE;for(Entity entity:world.view(MeshRenderer.class).keySet()){Transform transform=world.get(entity,Transform.class).orElse(null);if(transform==null)continue;float[] point=project(transform.position(),left,top,width,height);float distance=(point[0]-mouseX)*(point[0]-mouseX)+(point[1]-mouseY)*(point[1]-mouseY);if(distance<50*50&&distance<nearestDistance){nearest=entity;nearestDistance=distance;}}return nearest;}
