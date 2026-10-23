@@ -9,6 +9,7 @@ The root `pom.xml` is the parent and reactor aggregator. Import it into your IDE
 | Module | Contents | Aether dependencies |
 | --- | --- | --- |
 | `aether-engine` | ECS, engine lifecycle, math, physics, scripts, and render/audio component declarations | None |
+| `aether-project` | Versioned project manifests, validation, path resolution, and JSON persistence | None |
 | `aether-desktop` | GLFW window, desktop loop, OpenGL renderer, textures, and packaged shaders | Engine |
 | `examples/tetris` (`aether-tetris`) | Deterministic Tetris game and its ECS presentation adapter | Engine |
 | `aether-editor` | ImGui editor, entry point, scene camera, and editor showcase scenes | Engine, desktop, Tetris |
@@ -17,7 +18,23 @@ The engine has no production library dependencies and can be built and tested wi
 
 The desktop loop hosts a `DesktopLayer` supplied by the application. It has no dependency on the editor and creates/closes that layer inside the active render context.
 
-This is the first step toward independent game projects. The editor still depends on the Tetris example to preserve the current menus, input, and HUD. Project manifests, scene serialization, runtime game-module loading, and removing that dependency are subsequent steps. These are Maven modules, not Java Platform Module System modules.
+The editor still depends on the Tetris example to preserve the current menus, input, and HUD. Project manifests are implemented in the headless `aether-project` module, which uses Gson for JSON and does not depend on the engine, desktop, or editor. The Tetris module uses it only in tests to verify its example manifest. Editor project sessions, Open Project integration, scene serialization, and runtime game-module loading are subsequent steps. These are Maven modules, not Java Platform Module System modules.
+
+## Project files
+
+An `.aetherproj` file stores project configuration as versioned UTF-8 JSON. The example at `examples/tetris/Tetris.aetherproj` currently declares:
+
+```json
+{
+  "formatVersion": 1,
+  "name": "Tetris",
+  "assetDirectory": "assets"
+}
+```
+
+All configured paths are relative to the manifest's directory. Moving the project folder therefore preserves their meaning. Optional starting-scene and game-module declarations are supported by the format, but do not load scenes or execute code yet.
+
+See [the project file format and Java API](docs/project-files.md) for the complete schema, validation rules, and read/write examples. The editor menu does not open these files yet.
 
 ## Build and test
 
