@@ -3,6 +3,7 @@ package dev.aether.project;
 import dev.aether.core.AetherEngine;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Path;
 import java.util.Objects;
 import java.util.Optional;
@@ -20,11 +21,7 @@ public final class ProjectManager implements AutoCloseable {
     private boolean closed;
 
     public ProjectManager() {
-        this(session -> {
-            ProjectFile file = session.project().orElseThrow();
-            if (file.startScene().isPresent() || file.gameModuleJar().isPresent())
-                throw new IOException("Scene and game-module loading are not configured for this host");
-        });
+        this(new GameModuleLoader());
     }
 
     public ProjectManager(ProjectInitializer initializer) {
@@ -40,6 +37,11 @@ public final class ProjectManager implements AutoCloseable {
     public void requestOpen(Path manifest) {
         requireOpen();
         pending = new Open(ProjectPaths.manifest(manifest));
+    }
+
+    public void requestCreate(Path manifest, String name) {
+        requireOpen();
+        pending = new Create(ProjectPaths.manifest(manifest), ProjectConfig.create(name, Path.of("assets")));
     }
 
     /** Creates a fresh world within the current project, or an untitled session if none is open. */
@@ -70,8 +72,17 @@ public final class ProjectManager implements AutoCloseable {
             }
             Optional<ProjectFile> file;
             ProjectInitializer prepare;
-            if (request instanceof Open open) {
-                ProjectFile loaded = serializer.read(open.manifest());
+            if (request instanceof Open || request instanceof Create) {
+                ProjectFile loaded;
+                if (request instanceof Create create) {
+                    if (Files.exists(create.manifest(), java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                        throw new FileAlreadyExistsException(create.manifest().toString());
+                    Path directory = create.manifest().getParent();
+                    Files.createDirectories(directory.resolve(create.config().assetDirectory()));
+                    loaded = serializer.create(create.manifest(), create.config());
+                } else {
+                    loaded = serializer.read(((Open) request).manifest());
+                }
                 validateFiles(loaded);
                 file = Optional.of(loaded);
                 prepare = initializer;
@@ -145,8 +156,9 @@ public final class ProjectManager implements AutoCloseable {
             throw new IllegalStateException("Session changes are only allowed between updates");
     }
 
-    private sealed interface Request permits Open, Reset, Close { }
+    private sealed interface Request permits Open, Create, Reset, Close { }
     private record Open(Path manifest) implements Request { }
+    private record Create(Path manifest, ProjectConfig config) implements Request { }
     private record Reset(ProjectInitializer initializer) implements Request { }
     private record Close() implements Request { }
 }

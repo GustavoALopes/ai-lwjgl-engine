@@ -19,7 +19,7 @@ Project filenames use the `.aetherproj` extension. Contents are UTF-8 JSON:
 }
 ```
 
-This full example illustrates declarations for future scene and code loaders. It does not imply that those files or that class already exist.
+This full example illustrates the schema, including a future serialized scene. The default host currently rejects `startScene`, since scene serialization is not implemented. Omit it for a project initialized entirely by a game module.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
@@ -35,7 +35,7 @@ Omit optional fields when unused. Explicit `null` values are rejected. Fields ca
 
 Every path resolves from the directory containing the manifest, including `startScene` and `gameModule.jar`; these do not resolve from `assetDirectory`. Paths are normalized, must remain lexically inside the project directory, and cannot be absolute, UNC, or drive-relative paths. Saves use forward slashes. Windows-style separators are accepted and normalized on input.
 
-Path validation is lexical and does not follow symbolic links. Reading validates declarations only: it does not require referenced files to exist, read scene contents, load a class, or execute game code. Later project-session loading will check the resources it needs.
+Path validation is lexical and does not follow symbolic links. Reading through `ProjectSerializer` validates declarations only. Activating a project through `ProjectManager` checks referenced paths and initializes its optional game module.
 
 ## Java API
 
@@ -67,6 +67,6 @@ Saving writes the full manifest to a temporary sibling before replacing the dest
 
 ## Tetris example and next steps
 
-`examples/tetris/Tetris.aetherproj` declares its name and `assets` directory. It omits `startScene` and `gameModule` because the current demo builds its scene in Java and has no loadable game-module contract yet.
+`examples/tetris/Tetris.aetherproj` declares the Tetris game module in `target/aether-tetris.jar`. Run `mvn package` or `mvn install` to build that JAR before opening the project. The module initializes its scene in Java, so the manifest omits `startScene`.
 
-Project sessions and the editor's Open/Close Project menu now use this manifest API. Scene persistence, compiled game-module loading, and editor preferences remain separate work.
+Project sessions and the editor's New/Open/Reload/Close Project menus use this manifest API. Scene persistence and persistent editor preferences remain separate work.

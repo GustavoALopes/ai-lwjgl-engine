@@ -13,6 +13,7 @@
         <module>aether-project</module>
         <module>aether-desktop</module>
         <module>examples/tetris</module>
+        <module>examples/showcase</module>
         <module>aether-editor</module>
     </modules>
     <properties>

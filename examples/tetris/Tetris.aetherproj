@@ -1,5 +1,9 @@
 {
   "formatVersion": 1,
   "name": "Tetris",
-  "assetDirectory": "assets"
+  "assetDirectory": "assets",
+  "gameModule": {
+    "jar": "target/aether-tetris.jar",
+    "entryPoint": "dev.aether.demo.TetrisModule"
+  }
 }

@@ -73,10 +73,12 @@ public final class OpenGlRenderer implements AutoCloseable {
                 model.get(b);
                 glUniformMatrix4fv(glGetUniformLocation(program, "model"), false, b);
             }
-            Vec3 color = colorFor(entry.getValue().materialId());
+            Material material = world.get(entry.getKey(), Material.class)
+                    .orElseGet(() -> new Material(colorFor(entry.getValue().materialId()), 0));
+            Vec3 color = material.color();
             glUniform3f(glGetUniformLocation(program, "tint"), (float) color.x(), (float) color.y(), (float) color.z());
             glUniform1f(glGetUniformLocation(program, "emissive"),
-                    entry.getValue().materialId().equals("feature/emissive") ? 6 : 0);
+                    (float) material.emissive());
             glDrawArrays(GL_TRIANGLES, 0, 36);
         }
         glBindFramebuffer(GL_FRAMEBUFFER, displayFramebuffer);
@@ -106,20 +108,9 @@ public final class OpenGlRenderer implements AutoCloseable {
 
     private Vec3 colorFor(String material) {
         return switch (material) {
-            case "feature/ground" -> new Vec3(.16, .18, .23);
-            case "feature/metal" -> new Vec3(.13, .48, 1.4);
-            case "feature/emissive" -> new Vec3(1.25, .12, .015);
-            case "feature/occluder" -> new Vec3(.25, .28, .33);
-            case "pbr/metallic-blue", "tetris/blue" -> new Vec3(.08, .35, .95);
-            case "pbr/emissive-orange", "tetris/orange" -> new Vec3(1, .25, .04);
+            case "pbr/metallic-blue" -> new Vec3(.08, .35, .95);
+            case "pbr/emissive-orange" -> new Vec3(1, .25, .04);
             case "pbr/checker" -> new Vec3(.2, .27, .34);
-            case "tetris/empty" -> new Vec3(.06, .08, .12);
-            case "tetris/cyan" -> new Vec3(.05, .85, .9);
-            case "tetris/yellow" -> new Vec3(.95, .8, .05);
-            case "tetris/purple" -> new Vec3(.65, .2, .9);
-            case "tetris/green" -> new Vec3(.15, .8, .3);
-            case "tetris/red" -> new Vec3(.95, .12, .16);
-            case "tetris/particle" -> new Vec3(.3, .9, 1);
             default -> new Vec3(.75, .75, .75);
         };
     }

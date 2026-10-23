@@ -15,6 +15,22 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ProjectManagerTest {
+    @Test void createsAnEmptyProjectWithoutOverwritingExistingManifests() throws IOException {
+        Path file = temporary.resolve("new-project/Game.aetherproj");
+        try (var manager = new ProjectManager()) {
+            manager.requestCreate(file, "New Game");
+            assertFalse(Files.exists(file));
+            manager.applyPending();
+            var original = manager.activeSession().orElseThrow();
+            assertTrue(Files.isDirectory(file.getParent().resolve("assets")));
+            assertEquals("New Game", original.project().orElseThrow().config().name());
+            String contents = Files.readString(file);
+            manager.requestCreate(file, "Replacement");
+            assertThrows(java.nio.file.FileAlreadyExistsException.class, manager::applyPending);
+            assertEquals(contents, Files.readString(file));
+            assertSame(original, manager.activeSession().orElseThrow());
+        }
+    }
     @TempDir Path temporary;
 
     @Test void switchesOnlyAtBoundaryAndRunsOnlyTheNewWorld() throws IOException {

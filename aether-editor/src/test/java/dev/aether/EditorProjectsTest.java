@@ -14,40 +14,73 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
 class EditorProjectsTest {
+    @Test void projectCreationWaitsForDiscardAndUpdatesImmutableRecentHistory() {
+        Path file = temporary.resolve("created/Game.aetherproj");
+        try (var projects = new EditorProjects()) {
+            projects.markDirty();
+            projects.requestCreate(file, "Created");
+            projects.update(0);
+            assertFalse(Files.exists(file));
+            projects.cancel();
+            assertFalse(Files.exists(file));
+            projects.requestCreate(file, "Created");
+            projects.discardAndContinue();
+            projects.update(0);
+            assertTrue(Files.exists(file));
+            assertEquals(java.util.List.of(file.toAbsolutePath()), projects.recentProjects());
+            assertThrows(UnsupportedOperationException.class, () -> projects.recentProjects().clear());
+            projects.requestReload();
+            projects.update(0);
+            assertEquals(1, projects.recentProjects().size());
+        }
+    }
+
+    @Test void recentHistoryIsBoundedAndFailedOpensAreNotAdded() {
+        try (var projects = new EditorProjects()) {
+            for (int index = 0; index < 12; index++) {
+                projects.requestCreate(temporary.resolve("project-" + index + "/Game.aetherproj"), "Game " + index);
+                projects.update(0);
+            }
+            assertEquals(10, projects.recentProjects().size());
+            assertEquals(temporary.resolve("project-11/Game.aetherproj"), projects.recentProjects().getFirst());
+            projects.requestOpen(temporary.resolve("Missing.aetherproj"));
+            projects.update(0);
+            assertEquals(10, projects.recentProjects().size());
+            assertEquals(temporary.resolve("project-11/Game.aetherproj"), projects.recentProjects().getFirst());
+        }
+    }
     @TempDir Path temporary;
 
-    @Test void demoSwitchesAreDeferredAndOldTetrisSystemsStop() {
+    @Test void sceneSwitchesAreDeferredAndOldSystemsStop() {
         try (var projects = new EditorProjects()) {
-            ProjectSession showcase = projects.activeSession().orElseThrow();
-            projects.requestScene(EditorProjects.Scene.TETRIS);
-            assertSame(showcase, projects.activeSession().orElseThrow());
+            ProjectSession original = projects.activeSession().orElseThrow();
+            int[] updates = {0};
+            original.world().addSystem((world, dt) -> updates[0]++);
             projects.update(0);
-            ProjectSession tetrisSession = projects.activeSession().orElseThrow();
-            var game = projects.tetris().orElseThrow().game();
-            projects.update(.1);
-            double previousElapsed = game.snapshot().elapsedSeconds();
-            projects.requestScene(EditorProjects.Scene.SHOWCASE);
-            projects.update(.1);
-            assertEquals(ProjectSession.State.CLOSED, tetrisSession.state());
-            assertEquals(previousElapsed, game.snapshot().elapsedSeconds());
-            assertEquals(4, projects.activeSession().orElseThrow().world().entityCount());
-            assertTrue(projects.tetris().isEmpty());
+            projects.requestNewScene();
+            assertSame(original, projects.activeSession().orElseThrow());
+            projects.update(0);
+            assertEquals(ProjectSession.State.CLOSED, original.state());
+            assertEquals(1, updates[0]);
+            assertEquals(0, projects.activeSession().orElseThrow().world().entityCount());
         }
     }
 
     @Test void dirtySceneRequiresExplicitDiscardAndCancellationPreservesEdits() {
         try (var projects = new EditorProjects()) {
             ProjectSession original = projects.activeSession().orElseThrow();
+            original.world().create("authored entity");
             projects.markDirty();
-            projects.requestScene(EditorProjects.Scene.EMPTY);
+            projects.requestNewScene();
             projects.update(0);
             assertSame(original, projects.activeSession().orElseThrow());
             assertTrue(projects.needsConfirmation());
             projects.cancel();
             projects.update(0);
             assertSame(original, projects.activeSession().orElseThrow());
+            assertEquals(1, original.world().entityCount());
             assertTrue(projects.dirty());
-            projects.requestScene(EditorProjects.Scene.EMPTY);
+            projects.requestNewScene();
             projects.discardAndContinue();
             projects.update(0);
             assertNotSame(original, projects.activeSession().orElseThrow());
@@ -59,7 +92,7 @@ class EditorProjectsTest {
     @Test void editsMadeAfterQueuingAnActionAlsoRequireConfirmation() {
         try (var projects = new EditorProjects()) {
             ProjectSession original = projects.activeSession().orElseThrow();
-            projects.requestScene(EditorProjects.Scene.EMPTY);
+            projects.requestNewScene();
             projects.markDirty();
             projects.update(0);
             assertSame(original, projects.activeSession().orElseThrow());
@@ -67,41 +100,40 @@ class EditorProjectsTest {
         }
     }
 
-    @Test void failedOpenKeepsDirtySceneAndGamePresentationState() {
+    @Test void failedOpenKeepsDirtyWorld() {
         try (var projects = new EditorProjects()) {
-            projects.requestScene(EditorProjects.Scene.TETRIS);
-            projects.update(0);
             ProjectSession original = projects.activeSession().orElseThrow();
-            var tetris = projects.tetris().orElseThrow();
+            original.world().create("keep me");
             projects.markDirty();
             projects.requestOpen(temporary.resolve("Missing.aetherproj"));
             projects.discardAndContinue();
             projects.update(0);
             assertSame(original, projects.activeSession().orElseThrow());
-            assertSame(tetris, projects.tetris().orElseThrow());
+            assertEquals(1, original.world().entityCount());
             assertTrue(projects.dirty());
             assertTrue(projects.error().isPresent());
         }
     }
 
-    @Test void opensMinimalProjectAndResetsScenesWithinItsProjectContext() throws IOException {
+    @Test void opensReloadsAndResetsWithinTheProjectContext() throws IOException {
         Path manifest = manifest();
         try (var projects = new EditorProjects()) {
             projects.requestOpen(manifest);
             projects.update(0);
-            var project = projects.activeSession().orElseThrow().project().orElseThrow();
+            var original = projects.activeSession().orElseThrow();
+            var project = original.project().orElseThrow();
             assertEquals("Test", project.config().name());
-            assertEquals(EditorProjects.Scene.EMPTY, projects.scene());
-            assertEquals(0, projects.activeSession().orElseThrow().world().entityCount());
-            projects.requestScene(EditorProjects.Scene.TETRIS);
+            assertEquals(0, original.world().entityCount());
+            projects.requestNewScene();
             projects.update(0);
             assertEquals(project, projects.activeSession().orElseThrow().project().orElseThrow());
-            assertEquals(201, projects.activeSession().orElseThrow().world().entityCount());
+            projects.requestReload();
+            projects.update(0);
+            assertNotSame(original, projects.activeSession().orElseThrow());
             projects.requestClose();
             projects.update(0);
             assertTrue(projects.activeSession().isEmpty());
-            assertTrue(projects.tetris().isEmpty());
-            projects.requestScene(EditorProjects.Scene.EMPTY);
+            projects.requestNewScene();
             projects.update(0);
             assertTrue(projects.activeSession().orElseThrow().project().isEmpty());
         }
@@ -142,24 +174,35 @@ class EditorProjectsTest {
         }
     }
 
-    @Test void cleanupFailureReportsErrorButUpdatesPresentationToNewSession() {
+    @Test void cleanupFailureReportsErrorButPublishesTheNewSession() {
         try (var projects = new EditorProjects()) {
-            projects.requestScene(EditorProjects.Scene.TETRIS);
+            var previous = projects.activeSession().orElseThrow();
+            previous.own(() -> { throw new IOException("cleanup"); });
+            projects.requestNewScene();
             projects.update(0);
-            projects.activeSession().orElseThrow().own(() -> { throw new IOException("cleanup"); });
-            projects.requestScene(EditorProjects.Scene.EMPTY);
-            projects.update(0);
-            assertEquals(EditorProjects.Scene.EMPTY, projects.scene());
-            assertTrue(projects.tetris().isEmpty());
+            assertNotSame(previous, projects.activeSession().orElseThrow());
             assertEquals(0, projects.activeSession().orElseThrow().world().entityCount());
             assertTrue(projects.error().isPresent());
         }
     }
 
-    @Test void invalidTimeDoesNotApplyQueuedActionsAndClosedControllerRejectsWork() {
+    @Test void gameSystemFailurePausesSimulationAndKeepsEditorUsable() {
+        try (var projects = new EditorProjects()) {
+            var session = projects.activeSession().orElseThrow();
+            session.world().addSystem((world, dt) -> { throw new IllegalArgumentException("bad game"); });
+            projects.update(0);
+            assertEquals(AetherEngine.State.PAUSED, session.engine().state());
+            assertTrue(projects.error().orElseThrow().contains("bad game"));
+            projects.requestNewScene();
+            projects.update(0);
+            assertEquals(AetherEngine.State.RUNNING, projects.activeSession().orElseThrow().engine().state());
+        }
+    }
+
+    @Test void invalidTimeDoesNotApplyActionsAndClosedControllerRejectsWork() {
         var projects = new EditorProjects();
         ProjectSession original = projects.activeSession().orElseThrow();
-        projects.requestScene(EditorProjects.Scene.EMPTY);
+        projects.requestNewScene();
         assertThrows(IllegalArgumentException.class, () -> projects.update(-1));
         assertSame(original, projects.activeSession().orElseThrow());
         projects.close();

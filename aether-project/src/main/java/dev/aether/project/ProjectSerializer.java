@@ -38,11 +38,24 @@ public final class ProjectSerializer {
      * Uses an atomic move where the filesystem supports it. Parent directories must already exist.
      */
     public ProjectFile write(Path file, ProjectConfig config) throws IOException {
+        return persist(file, config, true);
+    }
+
+    /** Creates a new manifest without replacing an existing file, including under concurrent creation. */
+    public ProjectFile create(Path file, ProjectConfig config) throws IOException {
+        return persist(file, config, false);
+    }
+
+    private ProjectFile persist(Path file, ProjectConfig config, boolean replace) throws IOException {
         ProjectFile project = new ProjectFile(file, Objects.requireNonNull(config, "config"));
         String json = encode(config);
         Path temporary = Files.createTempFile(project.directory(), ".aether-project-", ".tmp");
         try {
             Files.writeString(temporary, json, StandardCharsets.UTF_8);
+            if (!replace) {
+                Files.move(temporary, project.manifestFile());
+                return project;
+            }
             try {
                 Files.move(temporary, project.manifestFile(), StandardCopyOption.ATOMIC_MOVE,
                         StandardCopyOption.REPLACE_EXISTING);

@@ -15,6 +15,8 @@ class TetrisProjectTest {
         assertTrue(Files.isDirectory(project.assetDirectory()));
         assertEquals(project.directory().resolve("assets"), project.assetDirectory());
         assertTrue(project.startScene().isEmpty());
-        assertTrue(project.gameModuleJar().isEmpty());
+        assertEquals(project.directory().resolve("target/aether-tetris.jar"),
+                project.gameModuleJar().orElseThrow());
+        assertEquals("dev.aether.demo.TetrisModule", project.config().gameModule().orElseThrow().entryPoint());
     }
 }

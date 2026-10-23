@@ -1,0 +1,9 @@
+{
+  "formatVersion": 1,
+  "name": "Render Feature Lab",
+  "assetDirectory": "assets",
+  "gameModule": {
+    "jar": "target/aether-showcase.jar",
+    "entryPoint": "dev.aether.demo.RenderFeaturesModule"
+  }
+}

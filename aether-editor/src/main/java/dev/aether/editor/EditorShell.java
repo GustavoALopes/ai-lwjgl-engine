@@ -1,8 +1,8 @@
 package dev.aether.editor;
 
 import dev.aether.core.AetherEngine;
-import dev.aether.demo.TetrisDemo;
-import dev.aether.demo.TetrisScene;
+import dev.aether.game.GameKey;
+import dev.aether.game.GamePresentation;
 import dev.aether.ecs.Entity;
 import dev.aether.ecs.World;
 import dev.aether.math.Vec3;
@@ -22,7 +22,10 @@ import imgui.glfw.ImGuiImplGlfw;
 import imgui.type.ImString;
 import dev.aether.platform.LwjglWindow;
 import dev.aether.platform.DesktopApplication;
+import dev.aether.platform.LwjglGameKeys;
 import dev.aether.project.ProjectSession;
+import dev.aether.project.AssetCatalog;
+import java.io.IOException;
 import java.nio.file.Path;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
@@ -30,6 +33,8 @@ import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.Objects;
+import java.util.EnumSet;
+import java.util.List;
 import static org.lwjgl.glfw.GLFW.*;
 
 /**
@@ -45,6 +50,9 @@ public final class EditorShell implements DesktopApplication {
     private ProjectSession displayedSession;
     private final ImString projectPath = new ImString(2048);
     private boolean showOpenProject;
+    private boolean showNewProject;
+    private final ImString newProjectName = new ImString(128);
+    private final ImString newProjectFile = new ImString(2048);
     private String projectDialogError;
     private boolean closed;
     private Entity selected;
@@ -67,9 +75,12 @@ public final class EditorShell implements DesktopApplication {
     private boolean rightNavigating;
     private boolean middleNavigating;
     private boolean leftNavigating;
-    private TetrisScene tetrisScene;
-    private boolean tetrisSceneOpen;
-    private final Set<Integer> heldTetrisKeys = new LinkedHashSet<>();
+    private final GameInputTracker gameInput = new GameInputTracker();
+    private boolean viewportFocused;
+    private AssetCatalog assetCatalog;
+    private Path assetDirectory = Path.of(".");
+    private List<AssetCatalog.Entry> assets = List.of();
+    private String assetError;
     private boolean openSceneShortcutHeld;
     private boolean newSceneShortcutHeld;
     private boolean playShortcutHeld;
@@ -134,8 +145,7 @@ public final class EditorShell implements DesktopApplication {
         drawMenu(engine);
         drawProjectDialogs();
         if (session != null) {
-            if (engine.state() == AetherEngine.State.RUNNING)
-                handleTetrisInput(window);
+            handleGameInput(window, engine);
             drawHierarchy(world);
             drawInspector(world);
             drawViewport(window, world);
@@ -155,13 +165,23 @@ public final class EditorShell implements DesktopApplication {
     private void drawMenu(AetherEngine engine) {
         if (ImGui.beginMainMenuBar()) {
             if (ImGui.beginMenu("File")) {
+                if (ImGui.menuItem("New Project...")) showNewProject = true;
                 if (ImGui.menuItem("Open Project...", "Ctrl+O"))
                     showOpenProject = true;
+                if (ImGui.beginMenu("Recent Projects")) {
+                    if (projects.recentProjects().isEmpty()) ImGui.textDisabled("No recent projects");
+                    for (Path recent : projects.recentProjects())
+                        if (ImGui.menuItem(recent.toString())) projects.requestOpen(recent);
+                    ImGui.endMenu();
+                }
                 if (ImGui.menuItem("Close Project", null, false, projects.activeSession().isPresent()))
                     projects.requestClose();
+                if (ImGui.menuItem("Reload Project", null, false,
+                        projects.activeSession().flatMap(ProjectSession::project).isPresent()))
+                    projects.requestReload();
                 ImGui.separator();
                 if (ImGui.menuItem("New Scene", "Ctrl+N"))
-                    projects.requestScene(EditorProjects.Scene.EMPTY);
+                    projects.requestNewScene();
                 ImGui.menuItem("Open Scene...", null, false, false);
                 ImGui.menuItem("Save Scene", "Ctrl+S", false, false);
                 ImGui.separator();
@@ -176,13 +196,6 @@ public final class EditorShell implements DesktopApplication {
                     engine.resume();
                 if (ImGui.menuItem("Pause", "F6", false, running))
                     engine.pause();
-                ImGui.separator();
-                if (ImGui.menuItem("Open Cube Showcase"))
-                    projects.requestScene(EditorProjects.Scene.SHOWCASE);
-                if (ImGui.menuItem("Open Render Feature Lab"))
-                    projects.requestScene(EditorProjects.Scene.RENDER_FEATURES);
-                if (ImGui.menuItem("Open Tetris Demo"))
-                    projects.requestScene(EditorProjects.Scene.TETRIS);
                 ImGui.endMenu();
             }
             if (ImGui.beginMenu("View")) {
@@ -208,16 +221,52 @@ public final class EditorShell implements DesktopApplication {
         dragAxis = null;
         dragStartPosition = null;
         dragStartScale = null;
-        heldTetrisKeys.clear();
+        gameInput.reset();
+        viewportFocused = false;
         hasPreviousSceneMouse = false;
         rightNavigating = middleNavigating = leftNavigating = false;
         sceneCamera = SceneCamera.defaultCamera();
-        tetrisScene = projects.tetris().orElse(null);
-        tetrisSceneOpen = tetrisScene != null;
-        sceneViewMode = tetrisSceneOpen ? SceneViewMode.TWO_D : SceneViewMode.THREE_D;
+        sceneViewMode = projects.presentation().viewMode() == GamePresentation.ViewMode.TWO_D
+                ? SceneViewMode.TWO_D : SceneViewMode.THREE_D;
+        assetCatalog = null;
+        assetDirectory = Path.of(".");
+        assets = List.of();
+        assetError = null;
+        if (session != null && session.project().isPresent()) {
+            try {
+                assetCatalog = new AssetCatalog(session.assetDirectory());
+                refreshAssets();
+            } catch (IOException failure) {
+                assetError = failure.getMessage();
+            }
+        }
     }
 
     private void drawProjectDialogs() {
+        if (showNewProject) {
+            projectDialogError = null;
+            ImGui.openPopup("New Project");
+            showNewProject = false;
+        }
+        if (ImGui.beginPopupModal("New Project")) {
+            ImGui.inputText("Name", newProjectName);
+            ImGui.inputText("Project file (.aetherproj)", newProjectFile);
+            ImGui.textWrapped("Choose a manifest path. Its folder and assets directory will be created.");
+            if (ImGui.button("Create")) {
+                try {
+                    if (newProjectFile.get().isBlank())
+                        throw new IllegalArgumentException("Choose a project file path");
+                    projects.requestCreate(Path.of(newProjectFile.get()), newProjectName.get());
+                    ImGui.closeCurrentPopup();
+                } catch (IllegalArgumentException failure) {
+                    projectDialogError = failure.getMessage();
+                }
+            }
+            ImGui.sameLine();
+            if (ImGui.button("Cancel")) ImGui.closeCurrentPopup();
+            if (projectDialogError != null) ImGui.textWrapped(projectDialogError);
+            ImGui.endPopup();
+        }
         if (showOpenProject) {
             projectDialogError = null;
             ImGui.openPopup("Open Project");
@@ -267,7 +316,7 @@ public final class EditorShell implements DesktopApplication {
         if (openShortcutDown && !openSceneShortcutHeld)
             showOpenProject = true;
         if (newShortcutDown && !newSceneShortcutHeld)
-            projects.requestScene(EditorProjects.Scene.EMPTY);
+            projects.requestNewScene();
         openSceneShortcutHeld = openShortcutDown;
         newSceneShortcutHeld = newShortcutDown;
     }
@@ -283,32 +332,23 @@ public final class EditorShell implements DesktopApplication {
         pauseShortcutHeld = pauseShortcutDown;
     }
 
-    private void handleTetrisInput(LwjglWindow window) {
-        if (!tetrisSceneOpen || ImGui.getIO().getWantTextInput()
-                || ImGui.isPopupOpen("Open Project") || ImGui.isPopupOpen("Unsaved scene changes"))
-            return;
-        TetrisDemo game = tetrisScene.game();
-        if (pressed(window, GLFW_KEY_LEFT))
-            game.moveLeft();
-        if (pressed(window, GLFW_KEY_RIGHT))
-            game.moveRight();
-        if (pressed(window, GLFW_KEY_UP))
-            game.rotateClockwise();
-        if (pressed(window, GLFW_KEY_DOWN))
-            game.softDrop();
-        if (pressed(window, GLFW_KEY_SPACE))
-            game.hardDrop();
-        if (pressed(window, GLFW_KEY_R))
-            projects.requestScene(EditorProjects.Scene.TETRIS);
-    }
-
-    private boolean pressed(LwjglWindow window, int key) {
-        boolean down = window.isKeyDown(key);
-        if (!down) {
-            heldTetrisKeys.remove(key);
-            return false;
+    private void handleGameInput(LwjglWindow window, AetherEngine engine) {
+        Set<GameKey> held = EnumSet.noneOf(GameKey.class);
+        for (GameKey key : GameKey.values())
+            if (window.isKeyDown(LwjglGameKeys.code(key)))
+                held.add(key);
+        if (window.isKeyDown(GLFW_KEY_RIGHT_SHIFT)) held.add(GameKey.SHIFT);
+        if (window.isKeyDown(GLFW_KEY_RIGHT_CONTROL)) held.add(GameKey.CONTROL);
+        if (!viewportFocused || engine.state() != AetherEngine.State.RUNNING
+                || ImGui.getIO().getWantTextInput() || window.isMouseButtonDown(GLFW_MOUSE_BUTTON_RIGHT)
+                || (held.contains(GameKey.CONTROL) && (held.contains(GameKey.O) || held.contains(GameKey.N)))
+                || ImGui.isPopupOpen("Open Project") || ImGui.isPopupOpen("New Project")
+                || ImGui.isPopupOpen("Unsaved scene changes")) {
+            gameInput.suppress(held);
+            projects.input(dev.aether.game.GameInput.empty());
+        } else {
+            projects.input(gameInput.poll(held));
         }
-        return heldTetrisKeys.add(key);
     }
 
     private void drawHierarchy(World world) {
@@ -428,6 +468,7 @@ public final class EditorShell implements DesktopApplication {
         ImGui.setNextWindowPos(306, 28, ImGuiCond.Always);
         ImGui.setNextWindowSize(920, 798, ImGuiCond.Always);
         ImGui.begin("Scene View", ImGuiWindowFlags.NoScrollbar | editorPanelFlags());
+        viewportFocused = ImGui.isWindowFocused();
         if (ImGui.button("3D", sceneViewMode == SceneViewMode.THREE_D ? 58 : 48, 0))
             sceneViewMode = SceneViewMode.THREE_D;
         ImGui.sameLine();
@@ -452,11 +493,11 @@ public final class EditorShell implements DesktopApplication {
                 selected = hit;
         }
         drawGizmo(world, left, top, viewportWidth, viewportHeight);
-        if (tetrisSceneOpen) {
-            TetrisDemo.Snapshot game = tetrisScene.game().snapshot();
-            drawTetrisHud(left, top, viewportWidth, viewportHeight, game);
-            ImGui.textColored(.35f, .9f, 1f, 1f, "Arrows move/rotate | Space hard drop | R restart");
-        } else
+        GamePresentation presentation = projects.presentation();
+        drawGameHud(left, top, viewportWidth, viewportHeight, presentation);
+        if (!presentation.controls().isBlank())
+            ImGui.textColored(.35f, .9f, 1f, 1f, presentation.controls());
+        else
             ImGui.textColored(.35f, .75f, 1f, 1f,
                     sceneViewMode == SceneViewMode.THREE_D
                             ? "Navigate: RMB + WASD/QE fly | Alt + LMB orbit | MMB pan | wheel zoom"
@@ -464,19 +505,11 @@ public final class EditorShell implements DesktopApplication {
         ImGui.end();
     }
 
-    private void drawTetrisHud(float left, float top, float width, float height, TetrisDemo.Snapshot game) {
+    private void drawGameHud(float left, float top, float width, float height, GamePresentation presentation) {
         ImDrawList draw = ImGui.getWindowDrawList();
-        float leftPanel = left + width * .055f, rightPanel = left + width * .73f, y = top + height * .18f;
-        int label = 0xFFE5EDF5, value = 0xFFFFFFFF, accent = 0xFFFFE04A;
-        draw.addText(leftPanel, y, label, "LINES");
-        draw.addText(leftPanel, y + 25, accent, Integer.toString(game.lines()));
-        draw.addText(rightPanel, y, label, "TIME");
-        draw.addText(rightPanel, y + 25, value,
-                String.format("%02d:%02d", (int) game.elapsedSeconds() / 60, (int) game.elapsedSeconds() % 60));
-        draw.addText(rightPanel, y + 78, label, "SCORE");
-        draw.addText(rightPanel, y + 103, value, Integer.toString(game.score()));
-        draw.addText(rightPanel, y + 156, label, "TOTAL SCORE");
-        draw.addText(rightPanel, y + 181, accent, Integer.toString(game.totalScore()));
+        for (var label : presentation.labels())
+            draw.addText(left + width * (float) label.x(), top + height * (float) label.y(),
+                    Integer.reverseBytes(label.rgba()), label.text());
     }
 
     private void navigateViewport(LwjglWindow window, boolean hovered) {
@@ -557,6 +590,10 @@ public final class EditorShell implements DesktopApplication {
     }
 
     private void drawGizmo(World world, float left, float top, float width, float height) {
+        if (draggingEntity != null && !world.exists(draggingEntity)) {
+            draggingEntity = null;
+            dragAxis = null;
+        }
         if (selected == null || !world.exists(selected))
             return;
         Transform transform = world.get(selected, Transform.class).orElse(null);
@@ -653,14 +690,39 @@ public final class EditorShell implements DesktopApplication {
         ImGui.setNextWindowPos(1234, 28, ImGuiCond.Always);
         ImGui.setNextWindowSize(300, 390, ImGuiCond.Always);
         ImGui.begin("Asset Browser", editorPanelFlags());
-        projects.activeSession().flatMap(ProjectSession::project)
-                .ifPresent(project -> ImGui.textWrapped(project.assetDirectory().toString()));
-        ImGui.bulletText("primitive/cube");
-        ImGui.bulletText("primitive/sphere");
-        ImGui.bulletText("pbr/metallic-blue");
-        ImGui.bulletText("pbr/emissive-orange");
-        ImGui.bulletText("assets/audio/ambient.ogg");
+        if (assetCatalog == null) {
+            ImGui.textWrapped(assetError == null ? "Open a project to browse its assets." : assetError);
+        } else {
+            ImGui.textWrapped("Assets / " + assetDirectory);
+            if (ImGui.button("Refresh")) refreshAssets();
+            if (!assetDirectory.normalize().toString().isEmpty() && ImGui.button("..")) {
+                Path parent = assetDirectory.getParent();
+                assetDirectory = parent == null ? Path.of(".") : parent;
+                refreshAssets();
+            }
+            for (var asset : assets) {
+                if (asset.directory()) {
+                    if (ImGui.selectable("[dir] " + asset.path().getFileName())) {
+                        assetDirectory = asset.path();
+                        refreshAssets();
+                    }
+                } else {
+                    ImGui.bulletText(asset.path().getFileName().toString());
+                }
+            }
+            if (assetError != null) ImGui.textWrapped(assetError);
+        }
         ImGui.end();
+    }
+
+    private void refreshAssets() {
+        try {
+            assets = assetCatalog.list(assetDirectory);
+            assetError = null;
+        } catch (IOException | IllegalArgumentException failure) {
+            assets = List.of();
+            assetError = failure.getMessage();
+        }
     }
 
     private void drawConsole(World world) {

@@ -15,4 +15,5 @@
         <dependency><groupId>dev.aether</groupId><artifactId>aether-engine</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
     </dependencies>
+    <build><finalName>aether-tetris</finalName></build>
 </project>

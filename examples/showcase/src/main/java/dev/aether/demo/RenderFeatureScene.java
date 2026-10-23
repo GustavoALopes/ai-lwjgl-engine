@@ -4,6 +4,7 @@ import dev.aether.ecs.Entity;
 import dev.aether.ecs.World;
 import dev.aether.math.Vec3;
 import dev.aether.render.MeshRenderer;
+import dev.aether.render.Material;
 import dev.aether.scene.Transform;
 import java.util.List;
 import java.util.Objects;
@@ -36,6 +37,13 @@ public final class RenderFeatureScene {
         Entity entity = world.create(name);
         world.add(entity, new Transform(position, rotation, scale));
         world.add(entity, new MeshRenderer("primitive/cube", material));
+        Vec3 color = switch (material) {
+            case "feature/ground" -> new Vec3(.16, .18, .23);
+            case "feature/metal" -> new Vec3(.13, .48, 1.4);
+            case "feature/emissive" -> new Vec3(1.25, .12, .015);
+            default -> new Vec3(.25, .28, .33);
+        };
+        world.add(entity, new Material(color, material.equals("feature/emissive") ? 6 : 0));
         return entity;
     }
 }

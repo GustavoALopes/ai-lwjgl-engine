@@ -5,6 +5,7 @@ import dev.aether.ecs.World;
 import dev.aether.ecs.WorldSystem;
 import dev.aether.math.Vec3;
 import dev.aether.render.MeshRenderer;
+import dev.aether.render.Material;
 import dev.aether.render.PostProcessPulse;
 import dev.aether.scene.Transform;
 import java.util.ArrayList;
@@ -42,6 +43,7 @@ public final class TetrisScene implements WorldSystem {
             // Keep the whole 20-row board within the editor's default orthographic framing.
             world.add(cell, new Transform(new Vec3((column - 4.5) * .78, (9.5 - row) * .78, 0), Vec3.ZERO, new Vec3(.36, .36, .22)));
             world.add(cell, new MeshRenderer("primitive/cube", "tetris/empty"));
+            world.add(cell, new Material(colorFor("tetris/empty"), 0));
             cells.add(cell);
             materials.add("tetris/empty");
         }
@@ -71,6 +73,7 @@ public final class TetrisScene implements WorldSystem {
             String material = materialFor(displayed[row][column]);
             if (!material.equals(materials.get(index)) && world.exists(cells.get(index))) {
                 world.add(cells.get(index), new MeshRenderer("primitive/cube", material));
+                world.add(cells.get(index), new Material(colorFor(material), 0));
                 materials.set(index, material);
             }
         }
@@ -82,6 +85,18 @@ public final class TetrisScene implements WorldSystem {
             case 7 -> "tetris/orange"; default -> "tetris/empty";
         };
     }
+    private static Vec3 colorFor(String material) {
+        return switch (material) {
+            case "tetris/blue" -> new Vec3(.08, .35, .95);
+            case "tetris/orange" -> new Vec3(1, .25, .04);
+            case "tetris/cyan" -> new Vec3(.05, .85, .9);
+            case "tetris/yellow" -> new Vec3(.95, .8, .05);
+            case "tetris/purple" -> new Vec3(.65, .2, .9);
+            case "tetris/green" -> new Vec3(.15, .8, .3);
+            case "tetris/red" -> new Vec3(.95, .12, .16);
+            default -> new Vec3(.06, .08, .12);
+        };
+    }
     private void emit(World world, int count, boolean explosion) {
         for (int index = 0; index < count; index++) {
             double angle = index * 2.3999632297;
@@ -89,6 +104,7 @@ public final class TetrisScene implements WorldSystem {
             Entity entity = world.create(explosion ? "Tetris / Line Burst" : "Tetris / Lock Spark");
             world.add(entity, new Transform(new Vec3(0, explosion ? 0 : -6.2, .3), Vec3.ZERO, new Vec3(.09, .09, .09)));
             world.add(entity, new MeshRenderer("primitive/cube", "tetris/particle"));
+            world.add(entity, new Material(new Vec3(.3, .9, 1), 0));
             particles.add(new Particle(entity, Math.cos(angle) * speed, Math.sin(angle) * speed, explosion ? .8 : .32));
         }
     }

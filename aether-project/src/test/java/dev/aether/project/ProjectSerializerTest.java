@@ -14,6 +14,17 @@ import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ProjectSerializerTest {
+    @Test void createsManifestsWithoutOverwritingExistingContent() throws IOException {
+        Path file = temporary.resolve("New.aetherproj");
+        var config = ProjectConfig.create("New", Path.of("assets"));
+        serializer.create(file, config);
+        String original = Files.readString(file);
+        assertEquals(config, serializer.read(file).config());
+        assertThrows(java.nio.file.FileAlreadyExistsException.class,
+                () -> serializer.create(file, ProjectConfig.create("Replacement", Path.of("assets"))));
+        assertEquals(original, Files.readString(file));
+        try (var files = Files.list(temporary)) { assertEquals(1, files.count()); }
+    }
     @TempDir Path temporary;
     private final ProjectSerializer serializer = new ProjectSerializer();
     private static final String MINIMAL =

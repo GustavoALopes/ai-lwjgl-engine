@@ -14,7 +14,6 @@
         <dependency><groupId>dev.aether</groupId><artifactId>aether-project</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>dev.aether</groupId><artifactId>aether-engine</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>dev.aether</groupId><artifactId>aether-desktop</artifactId><version>${project.version}</version></dependency>
-        <dependency><groupId>dev.aether</groupId><artifactId>aether-tetris</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>org.joml</groupId><artifactId>joml</artifactId></dependency>
         <dependency><groupId>io.github.spair</groupId><artifactId>imgui-java-binding</artifactId></dependency>
         <dependency><groupId>io.github.spair</groupId><artifactId>imgui-java-lwjgl3</artifactId></dependency>
