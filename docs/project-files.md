@@ -1,6 +1,6 @@
 # Aether project files, version 1
 
-The `aether-project` Maven module provides immutable project configuration and filesystem persistence without creating a window, world, or render context.
+The manifest API in `aether-project` provides immutable project configuration and filesystem persistence without creating a window, world, or render context. The same module also provides [session management](project-sessions.md), which creates an engine/world when a project is activated.
 
 ## Format
 
@@ -69,4 +69,4 @@ Saving writes the full manifest to a temporary sibling before replacing the dest
 
 `examples/tetris/Tetris.aetherproj` declares its name and `assets` directory. It omits `startScene` and `gameModule` because the current demo builds its scene in Java and has no loadable game-module contract yet.
 
-This step establishes the file format and API. Project sessions, menu integration, scene persistence, compiled game-module loading, and editor preferences are separate work.
+Project sessions and the editor's Open/Close Project menu now use this manifest API. Scene persistence, compiled game-module loading, and editor preferences remain separate work.

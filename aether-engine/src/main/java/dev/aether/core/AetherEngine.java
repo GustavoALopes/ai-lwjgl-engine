@@ -50,9 +50,15 @@ public final class AetherEngine implements AutoCloseable {
     public void close() {
         if (state == State.CLOSED)
             return;
+        if (world.isUpdating())
+            throw new IllegalStateException("Cannot close an engine during update");
         if (state == State.RUNNING || state == State.PAUSED)
             stop();
-        state = State.CLOSED;
+        try {
+            world.close();
+        } finally {
+            state = State.CLOSED;
+        }
     }
 
     private void transition(State before, State after) {

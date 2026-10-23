@@ -11,6 +11,7 @@
     </parent>
     <artifactId>aether-editor</artifactId>
     <dependencies>
+        <dependency><groupId>dev.aether</groupId><artifactId>aether-project</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>dev.aether</groupId><artifactId>aether-engine</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>dev.aether</groupId><artifactId>aether-desktop</artifactId><version>${project.version}</version></dependency>
         <dependency><groupId>dev.aether</groupId><artifactId>aether-tetris</artifactId><version>${project.version}</version></dependency>

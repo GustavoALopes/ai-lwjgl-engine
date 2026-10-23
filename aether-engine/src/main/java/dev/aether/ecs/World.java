@@ -5,7 +5,7 @@ import java.util.*;
 /**
  * Ordered ECS world with safe deferred mutations while systems are executing.
  */
-public final class World {
+public final class World implements AutoCloseable {
     private final Map<Long, String> entities = new LinkedHashMap<>();
     private final Set<Long> allocated = new HashSet<>();
     private final Map<Class<?>, Map<Long, Component>> components = new LinkedHashMap<>();
@@ -13,8 +13,11 @@ public final class World {
     private final List<Runnable> pending = new ArrayList<>();
     private long nextId = 1;
     private boolean updating;
+    private boolean closing;
+    private boolean closed;
 
     public Entity create(String name) {
+        requireOpen();
         validateName(name);
         Entity e = new Entity(nextId++);
         allocated.add(e.id());
@@ -93,10 +96,16 @@ public final class World {
     }
 
     public void addSystem(WorldSystem s) {
+        requireOpen();
+        if (closing)
+            throw new IllegalStateException("World is closing");
         systems.add(Objects.requireNonNull(s));
     }
 
     public void update(double dt) {
+        requireOpen();
+        if (closing)
+            throw new IllegalStateException("World is closing");
         if (!Double.isFinite(dt) || dt < 0)
             throw new IllegalArgumentException("deltaSeconds must be finite and non-negative");
         if (updating)
@@ -113,6 +122,7 @@ public final class World {
     }
 
     private void mutate(Runnable r) {
+        requireOpen();
         if (updating)
             pending.add(r);
         else
@@ -120,6 +130,7 @@ public final class World {
     }
 
     private void requireKnown(Entity e) {
+        requireOpen();
         if (e == null || !allocated.contains(e.id()))
             throw new IllegalArgumentException("Unknown entity: " + e);
     }
@@ -127,5 +138,46 @@ public final class World {
     private static void validateName(String name) {
         if (name == null || name.isBlank())
             throw new IllegalArgumentException("Entity name must not be blank");
+    }
+
+    /** Closes systems in reverse registration order, then releases all world state. */
+    @Override
+    public void close() {
+        if (closed || closing)
+            return;
+        if (updating)
+            throw new IllegalStateException("Cannot close a world during update");
+        closing = true;
+        RuntimeException failure = null;
+        try {
+            for (int index = systems.size() - 1; index >= 0; index--) {
+                try {
+                    systems.get(index).close(this);
+                } catch (RuntimeException exception) {
+                    if (failure == null)
+                        failure = new IllegalStateException("Failed to close world systems");
+                    failure.addSuppressed(exception);
+                }
+            }
+        } finally {
+            systems.clear();
+            components.clear();
+            entities.clear();
+            allocated.clear();
+            pending.clear();
+            closed = true;
+            closing = false;
+        }
+        if (failure != null)
+            throw failure;
+    }
+
+    public boolean isUpdating() {
+        return updating;
+    }
+
+    private void requireOpen() {
+        if (closed)
+            throw new IllegalStateException("World is closed");
     }
 }

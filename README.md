@@ -9,16 +9,16 @@ The root `pom.xml` is the parent and reactor aggregator. Import it into your IDE
 | Module | Contents | Aether dependencies |
 | --- | --- | --- |
 | `aether-engine` | ECS, engine lifecycle, math, physics, scripts, and render/audio component declarations | None |
-| `aether-project` | Versioned project manifests, validation, path resolution, and JSON persistence | None |
+| `aether-project` | Project manifests, session ownership, and deferred switching | Engine |
 | `aether-desktop` | GLFW window, desktop loop, OpenGL renderer, textures, and packaged shaders | Engine |
 | `examples/tetris` (`aether-tetris`) | Deterministic Tetris game and its ECS presentation adapter | Engine |
-| `aether-editor` | ImGui editor, entry point, scene camera, and editor showcase scenes | Engine, desktop, Tetris |
+| `aether-editor` | ImGui editor, entry point, scene camera, and editor showcase scenes | Engine, project, desktop, Tetris |
 
 The engine has no production library dependencies and can be built and tested without LWJGL or ImGui. Native dependencies belong to the desktop and editor modules. Each module owns its tests; shaders use the standard `aether-desktop/src/main/resources` directory.
 
-The desktop loop hosts a `DesktopLayer` supplied by the application. It has no dependency on the editor and creates/closes that layer inside the active render context.
+The desktop loop hosts a `DesktopApplication` supplied by the application. It has no dependency on the editor and runs updates, rendering, and shutdown inside the active render context. The earlier `DesktopLayer` overload remains available for applications with a fixed engine.
 
-The editor still depends on the Tetris example to preserve the current menus, input, and HUD. Project manifests are implemented in the headless `aether-project` module, which uses Gson for JSON and does not depend on the engine, desktop, or editor. The Tetris module uses it only in tests to verify its example manifest. Editor project sessions, Open Project integration, scene serialization, and runtime game-module loading are subsequent steps. These are Maven modules, not Java Platform Module System modules.
+The editor still depends on the Tetris example to preserve the current game menus, input, and HUD. The headless `aether-project` module uses Gson for manifest JSON and the engine for isolated project sessions; it has no desktop or editor dependencies. The Tetris module uses it only in tests. Scene serialization and runtime game-module loading are subsequent steps. These are Maven modules, not Java Platform Module System modules.
 
 ## Project files
 
@@ -34,7 +34,13 @@ An `.aetherproj` file stores project configuration as versioned UTF-8 JSON. The 
 
 All configured paths are relative to the manifest's directory. Moving the project folder therefore preserves their meaning. Optional starting-scene and game-module declarations are supported by the format, but do not load scenes or execute code yet.
 
-See [the project file format and Java API](docs/project-files.md) for the complete schema, validation rules, and read/write examples. The editor menu does not open these files yet.
+Use **File > Open Project...** or **Ctrl+O** and enter a manifest path. The dialog shows the base directory used for relative paths. Opening `examples/tetris/Tetris.aetherproj` creates an empty scene in that project's context; use **Game > Open Tetris Demo** to play the existing Java demo. Its manifest does not yet declare a serialized scene or loadable game module.
+
+**File > Close Project** releases the session. **New Scene** creates an empty world, keeping the current project if one is open. The Game menu also offers the cube showcase and render-feature lab. Each switch uses a fresh engine/world, preventing old demo systems from running in the new scene.
+
+Editor scene edits trigger a discard/cancel prompt before opening, closing, resetting, or quitting. Scene saving is not implemented, so Open Scene and Save Scene remain disabled. Failed project opens preserve the current scene and report their error in Console.
+
+See [the project file format and Java API](docs/project-files.md) and [session lifecycle](docs/project-sessions.md) for details.
 
 ## Build and test
 

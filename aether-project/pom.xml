@@ -11,6 +11,11 @@
     <artifactId>aether-project</artifactId>
     <dependencies>
         <dependency>
+            <groupId>dev.aether</groupId>
+            <artifactId>aether-engine</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
         </dependency>
@@ -20,15 +25,4 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
-    <build>
-        <plugins>
-            <plugin>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <configuration>
-                    <!-- Keep temporary manifest files in the build directory on every platform. -->
-                    <argLine>"-Djava.io.tmpdir=${project.build.directory}"</argLine>
-                </configuration>
-            </plugin>
-        </plugins>
-    </build>
 </project>

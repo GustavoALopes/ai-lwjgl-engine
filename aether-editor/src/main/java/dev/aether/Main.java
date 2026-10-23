@@ -19,7 +19,6 @@ public final class Main {
         }
 
         DesktopRuntime.run(
-            Aether.createEngine(),
             WindowConfig.editorDefaults(),
             new OpenGlRenderer(RenderSettings.productionDefaults()),
             EditorShell::new

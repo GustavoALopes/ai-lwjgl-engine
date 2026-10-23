@@ -1,8 +1,6 @@
 package dev.aether.editor;
 
 import dev.aether.core.AetherEngine;
-import dev.aether.demo.DemoScenes;
-import dev.aether.demo.RenderFeatureScene;
 import dev.aether.demo.TetrisDemo;
 import dev.aether.demo.TetrisScene;
 import dev.aether.ecs.Entity;
@@ -23,23 +21,32 @@ import imgui.gl3.ImGuiImplGl3;
 import imgui.glfw.ImGuiImplGlfw;
 import imgui.type.ImString;
 import dev.aether.platform.LwjglWindow;
-import dev.aether.platform.DesktopLayer;
+import dev.aether.platform.DesktopApplication;
+import dev.aether.project.ProjectSession;
+import java.nio.file.Path;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
-import java.util.List;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.Objects;
 import static org.lwjgl.glfw.GLFW.*;
 
 /**
  * ImGui editor host. All controls operate through the public ECS surface, which
  * also makes them agent-addressable.
  */
-public final class EditorShell implements DesktopLayer {
+public final class EditorShell implements DesktopApplication {
     private final ImGuiImplGlfw glfw = new ImGuiImplGlfw();
     private final ImGuiImplGl3 gl3 = new ImGuiImplGl3();
     private final OpenGlRenderer renderer;
+    private final EditorProjects projects;
+    private final World emptyWorld = new World();
+    private ProjectSession displayedSession;
+    private final ImString projectPath = new ImString(2048);
+    private boolean showOpenProject;
+    private String projectDialogError;
+    private boolean closed;
     private Entity selected;
     private Entity inspectorEntity;
     private final ImString inspectorName = new ImString(128);
@@ -52,7 +59,7 @@ public final class EditorShell implements DesktopLayer {
     private Axis dragAxis;
     private TransformMode transformMode = TransformMode.TRANSLATE;
     private boolean showDemo = true;
-    private final SceneCamera sceneCamera = SceneCamera.defaultCamera();
+    private SceneCamera sceneCamera = SceneCamera.defaultCamera();
     private SceneViewMode sceneViewMode = SceneViewMode.THREE_D;
     private double previousSceneMouseX;
     private double previousSceneMouseY;
@@ -68,56 +75,114 @@ public final class EditorShell implements DesktopLayer {
     private boolean playShortcutHeld;
     private boolean pauseShortcutHeld;
 
-    public EditorShell(LwjglWindow window, AetherEngine engine, OpenGlRenderer renderer) {
-        this.renderer = renderer;
-        ImGui.createContext();
-        ImGui.getIO().setIniFilename(null);
-        glfw.init(window.handle(), true);
-        gl3.init("#version 410");
-        DemoScenes.populateShowcase(engine.world());
+    public EditorShell(LwjglWindow window, OpenGlRenderer renderer) {
+        Objects.requireNonNull(window, "window");
+        this.renderer = Objects.requireNonNull(renderer, "renderer");
+        projects = new EditorProjects();
+        boolean contextCreated = false;
+        boolean glfwAttempted = false;
+        boolean gl3Attempted = false;
+        try {
+            ImGui.createContext();
+            contextCreated = true;
+            ImGui.getIO().setIniFilename(null);
+            glfwAttempted = true;
+            if (!glfw.init(window.handle(), true))
+                throw new IllegalStateException("Unable to initialize the ImGui GLFW adapter");
+            gl3Attempted = true;
+            gl3.init("#version 410");
+        } catch (RuntimeException | Error failure) {
+            cleanupAfterFailure(projects::close, failure);
+            if (gl3Attempted) cleanupAfterFailure(gl3::dispose, failure);
+            if (glfwAttempted) cleanupAfterFailure(glfw::dispose, failure);
+            if (contextCreated) cleanupAfterFailure(ImGui::destroyContext, failure);
+            throw failure;
+        }
     }
 
-    public void render(LwjglWindow window, AetherEngine engine) {
+    private static void cleanupAfterFailure(Runnable cleanup, Throwable failure) {
+        try { cleanup.run(); }
+        catch (RuntimeException | Error exception) { failure.addSuppressed(exception); }
+    }
+
+    @Override
+    public void update(double deltaSeconds) {
+        projects.update(deltaSeconds);
+    }
+
+    @Override
+    public boolean canClose() {
+        if (!projects.dirty() || projects.quitRequested())
+            return true;
+        projects.requestQuit();
+        return false;
+    }
+
+    public void render(LwjglWindow window) {
+        ProjectSession session = projects.activeSession().orElse(null);
+        if (session != displayedSession)
+            resetSessionView(session);
+        AetherEngine engine = session == null ? null : session.engine();
+        World world = session == null ? emptyWorld : session.world();
+        if (projects.quitRequested())
+            window.requestClose();
         glfw.newFrame();
         ImGui.newFrame();
-        handleOpenSceneShortcut(window, engine);
-        handlePlayPauseShortcuts(window, engine);
-        drawMenu(window, engine);
-        handleTetrisInput(window, engine.world());
-        drawHierarchy(engine.world());
-        drawInspector(engine.world());
-        drawViewport(window, engine.world());
+        handleOpenSceneShortcut(window);
+        if (engine != null)
+            handlePlayPauseShortcuts(window, engine);
+        drawMenu(engine);
+        drawProjectDialogs();
+        if (session != null) {
+            if (engine.state() == AetherEngine.State.RUNNING)
+                handleTetrisInput(window);
+            drawHierarchy(world);
+            drawInspector(world);
+            drawViewport(window, world);
+        } else {
+            ImGui.setNextWindowPos(306, 28, ImGuiCond.Always);
+            ImGui.setNextWindowSize(920, 798, ImGuiCond.Always);
+            ImGui.begin("Scene View", editorPanelFlags());
+            ImGui.text("No project open. Use File > Open Project or New Scene.");
+            ImGui.end();
+        }
         drawAssets();
-        drawConsole(engine.world());
+        drawConsole(world);
         ImGui.render();
         gl3.renderDrawData(ImGui.getDrawData());
     }
 
-    private void drawMenu(LwjglWindow window, AetherEngine engine) {
+    private void drawMenu(AetherEngine engine) {
         if (ImGui.beginMainMenuBar()) {
             if (ImGui.beginMenu("File")) {
+                if (ImGui.menuItem("Open Project...", "Ctrl+O"))
+                    showOpenProject = true;
+                if (ImGui.menuItem("Close Project", null, false, projects.activeSession().isPresent()))
+                    projects.requestClose();
+                ImGui.separator();
                 if (ImGui.menuItem("New Scene", "Ctrl+N"))
-                    openCubeScene(engine.world());
-                if (ImGui.menuItem("Open Scene...", "Ctrl+O"))
-                    openTetrisScene(engine.world());
-                ImGui.menuItem("Save Scene", "Ctrl+S");
+                    projects.requestScene(EditorProjects.Scene.EMPTY);
+                ImGui.menuItem("Open Scene...", null, false, false);
+                ImGui.menuItem("Save Scene", "Ctrl+S", false, false);
                 ImGui.separator();
                 if (ImGui.menuItem("Quit"))
-                    window.requestClose();
+                    projects.requestQuit();
                 ImGui.endMenu();
             }
             if (ImGui.beginMenu("Game")) {
-                boolean running = engine.state() == AetherEngine.State.RUNNING;
-                boolean paused = engine.state() == AetherEngine.State.PAUSED;
+                boolean running = engine != null && engine.state() == AetherEngine.State.RUNNING;
+                boolean paused = engine != null && engine.state() == AetherEngine.State.PAUSED;
                 if (ImGui.menuItem(paused ? "Resume" : "Play (running)", "F5", running, paused))
                     engine.resume();
                 if (ImGui.menuItem("Pause", "F6", false, running))
                     engine.pause();
                 ImGui.separator();
+                if (ImGui.menuItem("Open Cube Showcase"))
+                    projects.requestScene(EditorProjects.Scene.SHOWCASE);
                 if (ImGui.menuItem("Open Render Feature Lab"))
-                    openRenderFeatureScene(engine.world());
-                if (ImGui.menuItem("Open Tetris Demo", "Ctrl+O"))
-                    openTetrisScene(engine.world());
+                    projects.requestScene(EditorProjects.Scene.RENDER_FEATURES);
+                if (ImGui.menuItem("Open Tetris Demo"))
+                    projects.requestScene(EditorProjects.Scene.TETRIS);
                 ImGui.endMenu();
             }
             if (ImGui.beginMenu("View")) {
@@ -135,37 +200,74 @@ public final class EditorShell implements DesktopLayer {
         }
     }
 
-    private void openTetrisScene(World world) {
-        if (tetrisScene == null)
-            tetrisScene = new TetrisScene(new TetrisDemo(0L));
-        tetrisScene.open(world);
-        tetrisSceneOpen = true;
+    private void resetSessionView(ProjectSession session) {
+        displayedSession = session;
         selected = null;
-        sceneViewMode = SceneViewMode.TWO_D;
+        inspectorEntity = null;
+        draggingEntity = null;
+        dragAxis = null;
+        dragStartPosition = null;
+        dragStartScale = null;
+        heldTetrisKeys.clear();
+        hasPreviousSceneMouse = false;
+        rightNavigating = middleNavigating = leftNavigating = false;
+        sceneCamera = SceneCamera.defaultCamera();
+        tetrisScene = projects.tetris().orElse(null);
+        tetrisSceneOpen = tetrisScene != null;
+        sceneViewMode = tetrisSceneOpen ? SceneViewMode.TWO_D : SceneViewMode.THREE_D;
     }
 
-    private void openCubeScene(World world) {
-        DemoScenes.resetToShowcase(world);
-        tetrisSceneOpen = false;
-        selected = null;
-        sceneViewMode = SceneViewMode.THREE_D;
+    private void drawProjectDialogs() {
+        if (showOpenProject) {
+            projectDialogError = null;
+            ImGui.openPopup("Open Project");
+            showOpenProject = false;
+        }
+        if (ImGui.beginPopupModal("Open Project")) {
+            ImGui.text("Enter the path to an .aetherproj file:");
+            ImGui.inputText("Project file", projectPath);
+            ImGui.textWrapped("Relative paths start at: " + Path.of("").toAbsolutePath());
+            if (ImGui.button("Open") && !projectPath.get().isBlank()) {
+                try {
+                    projects.requestOpen(Path.of(projectPath.get()));
+                    ImGui.closeCurrentPopup();
+                } catch (IllegalArgumentException failure) {
+                    projectDialogError = failure.getMessage();
+                }
+            }
+            ImGui.sameLine();
+            if (ImGui.button("Cancel"))
+                ImGui.closeCurrentPopup();
+            if (projectDialogError != null)
+                ImGui.textWrapped(projectDialogError);
+            ImGui.endPopup();
+        }
+        if (projects.needsConfirmation())
+            ImGui.openPopup("Unsaved scene changes");
+        if (ImGui.beginPopupModal("Unsaved scene changes")) {
+            ImGui.textWrapped("This scene has unsaved edits. Scene saving is not available yet.");
+            ImGui.text("Discard these edits to continue?");
+            if (ImGui.button("Discard and continue")) {
+                projects.discardAndContinue();
+                ImGui.closeCurrentPopup();
+            }
+            ImGui.sameLine();
+            if (ImGui.button("Keep editing")) {
+                projects.cancel();
+                ImGui.closeCurrentPopup();
+            }
+            ImGui.endPopup();
+        }
     }
 
-    private void openRenderFeatureScene(World world) {
-        RenderFeatureScene.open(world);
-        tetrisSceneOpen = false;
-        selected = null;
-        sceneViewMode = SceneViewMode.THREE_D;
-    }
-
-    private void handleOpenSceneShortcut(LwjglWindow window, AetherEngine engine) {
+    private void handleOpenSceneShortcut(LwjglWindow window) {
         boolean controlDown = window.isKeyDown(GLFW_KEY_LEFT_CONTROL) || window.isKeyDown(GLFW_KEY_RIGHT_CONTROL);
         boolean openShortcutDown = controlDown && window.isKeyDown(GLFW_KEY_O);
         boolean newShortcutDown = controlDown && window.isKeyDown(GLFW_KEY_N);
         if (openShortcutDown && !openSceneShortcutHeld)
-            openTetrisScene(engine.world());
+            showOpenProject = true;
         if (newShortcutDown && !newSceneShortcutHeld)
-            openCubeScene(engine.world());
+            projects.requestScene(EditorProjects.Scene.EMPTY);
         openSceneShortcutHeld = openShortcutDown;
         newSceneShortcutHeld = newShortcutDown;
     }
@@ -181,8 +283,9 @@ public final class EditorShell implements DesktopLayer {
         pauseShortcutHeld = pauseShortcutDown;
     }
 
-    private void handleTetrisInput(LwjglWindow window, World world) {
-        if (!tetrisSceneOpen)
+    private void handleTetrisInput(LwjglWindow window) {
+        if (!tetrisSceneOpen || ImGui.getIO().getWantTextInput()
+                || ImGui.isPopupOpen("Open Project") || ImGui.isPopupOpen("Unsaved scene changes"))
             return;
         TetrisDemo game = tetrisScene.game();
         if (pressed(window, GLFW_KEY_LEFT))
@@ -196,7 +299,7 @@ public final class EditorShell implements DesktopLayer {
         if (pressed(window, GLFW_KEY_SPACE))
             game.hardDrop();
         if (pressed(window, GLFW_KEY_R))
-            tetrisScene.open(world);
+            projects.requestScene(EditorProjects.Scene.TETRIS);
     }
 
     private boolean pressed(LwjglWindow window, int key) {
@@ -217,10 +320,12 @@ public final class EditorShell implements DesktopLayer {
             world.add(entity, Transform.identity());
             world.add(entity, new MeshRenderer("primitive/cube", "pbr/metallic-blue"));
             selected = entity;
+            projects.markDirty();
         }
         ImGui.sameLine();
         if (selected != null && ImGui.button("Delete") && world.exists(selected)) {
             world.destroy(selected);
+            projects.markDirty();
             selected = null;
         }
         ImGui.separator();
@@ -241,10 +346,14 @@ public final class EditorShell implements DesktopLayer {
         } else {
             syncInspectorFields(world);
             ImGui.textDisabled("Type: " + objectType(world));
-            if (ImGui.inputText("Name", inspectorName) && !inspectorName.get().isBlank())
+            if (ImGui.inputText("Name", inspectorName) && !inspectorName.get().isBlank()) {
                 world.rename(selected, inspectorName.get());
-            if (ImGui.inputText("Tags (comma separated)", inspectorTags))
+                projects.markDirty();
+            }
+            if (ImGui.inputText("Tags (comma separated)", inspectorTags)) {
                 world.add(selected, new Tags(parseTags(inspectorTags.get())));
+                projects.markDirty();
+            }
             ImGui.separator();
             if (ImGui.button("Move"))
                 transformMode = TransformMode.TRANSLATE;
@@ -256,13 +365,17 @@ public final class EditorShell implements DesktopLayer {
             world.get(selected, Transform.class).ifPresent(transform -> {
                 float[] position = { (float) transform.position().x(), (float) transform.position().y(),
                         (float) transform.position().z() };
-                if (ImGui.dragFloat3("Position", position, .05f))
+                if (ImGui.dragFloat3("Position", position, .05f)) {
                     world.add(selected,
                             transform.withPosition(new dev.aether.math.Vec3(position[0], position[1], position[2])));
+                    projects.markDirty();
+                }
                 float[] scale = { (float) transform.scale().x(), (float) transform.scale().y(),
                         (float) transform.scale().z() };
-                if (ImGui.dragFloat3("Scale", scale, .02f, .05f, 100f))
+                if (ImGui.dragFloat3("Scale", scale, .02f, .05f, 100f)) {
                     world.add(selected, transform.withScale(new Vec3(scale[0], scale[1], scale[2])));
+                    projects.markDirty();
+                }
                 ImGui.text("Transform Gizmo: " + transformMode.label);
             });
             world.get(selected, MeshRenderer.class).ifPresent(mesh -> {
@@ -273,8 +386,10 @@ public final class EditorShell implements DesktopLayer {
             ImGui.separator();
             ScriptComponent script = world.get(selected, ScriptComponent.class).orElse(null);
             if (script == null) {
-                if (ImGui.button("Add Script Component"))
+                if (ImGui.button("Add Script Component")) {
                     world.add(selected, new ScriptComponent(new EditorScript()));
+                    projects.markDirty();
+                }
             } else
                 ImGui.text("Script: " + script.script().getClass().getSimpleName());
             ImGui.textDisabled("Components: "
@@ -466,6 +581,8 @@ public final class EditorShell implements DesktopLayer {
             if (ImGui.isMouseDown(0)) {
                 double delta = dragAxis == Axis.X ? (ImGui.getMousePosX() - dragStartMouseX) / 50d
                         : (dragStartMouseY - ImGui.getMousePosY()) / 50d;
+                if (delta != 0)
+                    projects.markDirty();
                 Vec3 start = dragStartPosition;
                 if (transformMode == TransformMode.TRANSLATE) {
                     Vec3 position = dragAxis == Axis.X ? new Vec3(start.x() + delta, start.y(), start.z())
@@ -536,6 +653,8 @@ public final class EditorShell implements DesktopLayer {
         ImGui.setNextWindowPos(1234, 28, ImGuiCond.Always);
         ImGui.setNextWindowSize(300, 390, ImGuiCond.Always);
         ImGui.begin("Asset Browser", editorPanelFlags());
+        projects.activeSession().flatMap(ProjectSession::project)
+                .ifPresent(project -> ImGui.textWrapped(project.assetDirectory().toString()));
         ImGui.bulletText("primitive/cube");
         ImGui.bulletText("primitive/sphere");
         ImGui.bulletText("pbr/metallic-blue");
@@ -549,7 +668,11 @@ public final class EditorShell implements DesktopLayer {
         ImGui.setNextWindowSize(300, 400, ImGuiCond.Always);
         ImGui.begin("Console", editorPanelFlags());
         ImGui.textColored(.3f, 1f, .55f, 1f, "[Aether] Editor ready");
-        ImGui.text("Demo scene loaded: " + world.entityCount() + " entities");
+        ImGui.textWrapped(projects.activeSession().flatMap(ProjectSession::project)
+                .map(project -> "Project: " + project.config().name())
+                .orElse(projects.activeSession().isPresent() ? "Untitled scene" : "No project open"));
+        ImGui.text("Scene: " + world.entityCount() + " entities" + (projects.dirty() ? " *" : ""));
+        projects.error().ifPresent(error -> ImGui.textWrapped("[Project] " + error));
         ImGui.text("Physics + script systems enabled");
         ImGui.end();
     }
@@ -560,8 +683,19 @@ public final class EditorShell implements DesktopLayer {
 
     @Override
     public void close() {
-        gl3.dispose();
-        glfw.dispose();
-        ImGui.destroyContext();
+        if (closed)
+            return;
+        closed = true;
+        try {
+            projects.close();
+        } finally {
+            emptyWorld.close();
+            try {
+                gl3.dispose();
+            } finally {
+                try { glfw.dispose(); }
+                finally { ImGui.destroyContext(); }
+            }
+        }
     }
 }

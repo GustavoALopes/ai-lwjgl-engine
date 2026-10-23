@@ -9,6 +9,17 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class DesktopRuntimeTest {
+    @Test void sessionApplicationRejectsMissingArgumentsBeforeOpeningAWindow() {
+        var config = WindowConfig.editorDefaults();
+        var renderer = new OpenGlRenderer(RenderSettings.productionDefaults());
+        DesktopApplication.Factory factory = (window, r) -> {
+            fail("Validation must happen before creating the application");
+            return null;
+        };
+        assertThrows(NullPointerException.class, () -> DesktopRuntime.run(null, renderer, factory));
+        assertThrows(NullPointerException.class, () -> DesktopRuntime.run(config, null, factory));
+        assertThrows(NullPointerException.class, () -> DesktopRuntime.run(config, renderer, null));
+    }
     @Test void windowConfigRejectsInvalidDimensions() {
         assertThrows(IllegalArgumentException.class, () -> new WindowConfig("", 0, 1, true, true));
     }
