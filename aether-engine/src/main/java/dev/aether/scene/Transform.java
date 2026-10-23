@@ -1,0 +1,25 @@
+package dev.aether.scene;
+
+import dev.aether.ecs.Component;
+import dev.aether.math.Vec3;
+import java.util.Objects;
+
+public record Transform(Vec3 position, Vec3 rotationDegrees, Vec3 scale) implements Component {
+    public Transform {
+        Objects.requireNonNull(position);
+        Objects.requireNonNull(rotationDegrees);
+        Objects.requireNonNull(scale);
+    }
+
+    public static Transform identity() {
+        return new Transform(Vec3.ZERO, Vec3.ZERO, new Vec3(1, 1, 1));
+    }
+
+    public Transform withPosition(Vec3 p) {
+        return new Transform(p, rotationDegrees, scale);
+    }
+
+    public Transform withScale(Vec3 value) {
+        return new Transform(position, rotationDegrees, value);
+    }
+}

@@ -1,0 +1,63 @@
+package dev.aether.core;
+
+import dev.aether.ecs.World;
+import java.util.Objects;
+
+public final class AetherEngine implements AutoCloseable {
+    public enum State {
+        NEW, RUNNING, PAUSED, STOPPED, CLOSED
+    }
+
+    private final World world;
+    private State state = State.NEW;
+
+    public AetherEngine(World w) {
+        world = Objects.requireNonNull(w);
+    }
+
+    public State state() {
+        return state;
+    }
+
+    public World world() {
+        return world;
+    }
+
+    public void start() {
+        transition(State.NEW, State.RUNNING);
+    }
+
+    public void pause() {
+        transition(State.RUNNING, State.PAUSED);
+    }
+
+    public void resume() {
+        transition(State.PAUSED, State.RUNNING);
+    }
+
+    public void tick(double dt) {
+        if (state != State.RUNNING)
+            throw new IllegalStateException("Engine is not running");
+        world.update(dt);
+    }
+
+    public void stop() {
+        if (state != State.RUNNING && state != State.PAUSED)
+            throw new IllegalStateException("Expected running or paused but was " + state);
+        state = State.STOPPED;
+    }
+
+    public void close() {
+        if (state == State.CLOSED)
+            return;
+        if (state == State.RUNNING || state == State.PAUSED)
+            stop();
+        state = State.CLOSED;
+    }
+
+    private void transition(State before, State after) {
+        if (state != before)
+            throw new IllegalStateException("Expected " + before + " but was " + state);
+        state = after;
+    }
+}
