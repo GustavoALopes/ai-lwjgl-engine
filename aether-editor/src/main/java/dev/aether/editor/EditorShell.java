@@ -8,6 +8,7 @@ import dev.aether.ecs.World;
 import dev.aether.math.Vec3;
 import dev.aether.render.MeshRenderer;
 import dev.aether.render.OpenGlRenderer;
+import dev.aether.render.CameraMatrices;
 import dev.aether.script.Script;
 import dev.aether.script.ScriptComponent;
 import dev.aether.scene.Transform;
@@ -69,6 +70,9 @@ public final class EditorShell implements DesktopApplication {
     private boolean showDemo = true;
     private SceneCamera sceneCamera = SceneCamera.defaultCamera();
     private SceneViewMode sceneViewMode = SceneViewMode.THREE_D;
+    private boolean useEditorCamera;
+    private Matrix4f viewportProjection = new Matrix4f();
+    private Matrix4f viewportView = new Matrix4f();
     private double previousSceneMouseX;
     private double previousSceneMouseY;
     private boolean hasPreviousSceneMouse;
@@ -226,6 +230,7 @@ public final class EditorShell implements DesktopApplication {
         hasPreviousSceneMouse = false;
         rightNavigating = middleNavigating = leftNavigating = false;
         sceneCamera = SceneCamera.defaultCamera();
+        useEditorCamera = false;
         sceneViewMode = projects.presentation().viewMode() == GamePresentation.ViewMode.TWO_D
                 ? SceneViewMode.TWO_D : SceneViewMode.THREE_D;
         assetCatalog = null;
@@ -469,22 +474,41 @@ public final class EditorShell implements DesktopApplication {
         ImGui.setNextWindowSize(920, 798, ImGuiCond.Always);
         ImGui.begin("Scene View", ImGuiWindowFlags.NoScrollbar | editorPanelFlags());
         viewportFocused = ImGui.isWindowFocused();
-        if (ImGui.button("3D", sceneViewMode == SceneViewMode.THREE_D ? 58 : 48, 0))
+        if (ImGui.button("3D", sceneViewMode == SceneViewMode.THREE_D ? 58 : 48, 0)) {
             sceneViewMode = SceneViewMode.THREE_D;
+            useEditorCamera = true;
+        }
         ImGui.sameLine();
-        if (ImGui.button("2D", sceneViewMode == SceneViewMode.TWO_D ? 58 : 48, 0))
+        if (ImGui.button("2D", sceneViewMode == SceneViewMode.TWO_D ? 58 : 48, 0)) {
             sceneViewMode = SceneViewMode.TWO_D;
+            useEditorCamera = true;
+        }
+        boolean hasGameCamera = CameraMatrices.active(world, 1).isPresent();
+        if (hasGameCamera) {
+            ImGui.sameLine();
+            if (ImGui.button(useEditorCamera ? "Game Camera" : "Editor Camera")) {
+                useEditorCamera = !useEditorCamera;
+                rightNavigating = middleNavigating = leftNavigating = false;
+                hasPreviousSceneMouse = false;
+                draggingEntity = null;
+                dragAxis = null;
+            }
+        }
+        boolean gameView = hasGameCamera && !useEditorCamera;
         ImGui.sameLine();
-        ImGui.textDisabled(sceneViewMode == SceneViewMode.THREE_D ? "Perspective" : "Orthographic");
+        ImGui.textDisabled(gameView ? "Game camera active" : sceneViewMode == SceneViewMode.THREE_D ? "Editor perspective" : "Editor orthographic");
         ImGui.separator();
         float viewportWidth = ImGui.getContentRegionAvailX(), viewportHeight = ImGui.getContentRegionAvailY() - 28;
-        Matrix4f projection = projection(viewportWidth, viewportHeight);
+        var gameCamera = gameView ? CameraMatrices.active(world, Math.max(1, viewportWidth) / Math.max(1, viewportHeight))
+                : java.util.Optional.<CameraMatrices.Frame>empty();
+        viewportProjection = gameCamera.map(CameraMatrices.Frame::projection).orElseGet(() -> projection(viewportWidth, viewportHeight));
+        viewportView = gameCamera.map(CameraMatrices.Frame::view).orElseGet(this::viewMatrix);
         int texture = renderer.renderScene(world, Math.max(1, (int) viewportWidth), Math.max(1, (int) viewportHeight),
-                projection, viewMatrix());
+                viewportProjection, viewportView);
         ImGui.image(texture, viewportWidth, viewportHeight, 0, 1, 1, 0);
         float left = ImGui.getItemRectMinX(), top = ImGui.getItemRectMinY();
         boolean hovered = ImGui.isItemHovered();
-        navigateViewport(window, hovered);
+        if (!gameView) navigateViewport(window, hovered);
         if (hovered && ImGui.isMouseClicked(0) && !window.isKeyDown(GLFW_KEY_LEFT_ALT)
                 && !window.isKeyDown(GLFW_KEY_RIGHT_ALT)) {
             Entity hit = pick(world, left, top, viewportWidth, viewportHeight, ImGui.getMousePosX(),
@@ -492,7 +516,7 @@ public final class EditorShell implements DesktopApplication {
             if (hit != null)
                 selected = hit;
         }
-        drawGizmo(world, left, top, viewportWidth, viewportHeight);
+        if (!gameView) drawGizmo(world, left, top, viewportWidth, viewportHeight);
         GamePresentation presentation = projects.presentation();
         drawGameHud(left, top, viewportWidth, viewportHeight, presentation);
         if (!presentation.controls().isBlank())
@@ -662,7 +686,7 @@ public final class EditorShell implements DesktopApplication {
     }
 
     private float[] project(Vec3 position, float left, float top, float width, float height) {
-        Vector4f clip = projection(width, height).mul(viewMatrix())
+        Vector4f clip = new Matrix4f(viewportProjection).mul(viewportView)
                 .transform(new Vector4f((float) position.x(), (float) position.y(), (float) position.z(), 1));
         float ndcX = clip.x / clip.w, ndcY = clip.y / clip.w;
         return new float[] { left + (ndcX * .5f + .5f) * width, top + (1 - (ndcY * .5f + .5f)) * height };

@@ -55,6 +55,34 @@ Override `presentation()` to return a `GamePresentation`: a default 2D/3D view m
 
 `Material` is an immutable ECS component supplying a linear RGB tint and emissive intensity. HDR colors can exceed one. Game-specific material IDs and color palettes stay in the game project.
 
+## Game cameras and cutaway surfaces
+
+A game can add a `dev.aether.render.Camera` component and a `Transform` to an
+entity. `Camera.perspective(55, .1, 100)` creates an active perspective camera.
+Orthographic cameras use `Camera.Projection.ORTHOGRAPHIC` and a vertical world
+height. Transform supplies position and Euler rotation in degrees: forward is
+local -Z, up is +Y, rotation uses XYZ order, and camera scale is ignored.
+The first active camera with a Transform in entity registration order is selected.
+
+Scene View uses the game camera when present. Its **Editor Camera** button and
+2D/3D controls select the independent inspection camera; **Game Camera** returns
+to the game's view. Projects without a camera retain their existing scene view.
+Viewport picking uses the matrices of the displayed view; transform gizmos and
+camera navigation are available in the editor view. Camera optics stay in the
+headless engine, while `CameraMatrices` in the desktop adapter builds matrices.
+
+Add `CutawayTarget(padding)` to an entity whose transformed unit-box bounds
+should remain visible, and `CutawaySurface(remainingHeight)` to box-shaped meshes
+that may be shortened. Padding and remaining height are in world units.
+For room walls, use `CutawaySurface(remainingHeight, outwardNormal)` with a
+world-space outward normal: walls on the camera's side lower regardless of the
+player's position. A zero normal uses target obstruction instead, based on a
+conservative projected target rectangle. Both camera projections are supported.
+The renderer smoothly shortens the box about its original base, retaining solid
+sides and a closed top face. It does not use transparency or dithering.
+Simulation transforms and full-height collisions remain intact. Transition state
+is render-only and resets when the displayed world changes.
+
 ## Build, open, and reload
 
 From the engine repository:

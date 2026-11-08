@@ -25,10 +25,14 @@ public final class OpenGlRenderer implements AutoCloseable {
             -1, -1, -1, 0, 0, 1, -1, -1, 1, 0, 1, -1, 1, 1, 1, 1, -1, 1, 1, 1, -1, -1, 1, 0, 1, -1, -1, -1, 0, 0,
             -1, 1, -1, 0, 0, -1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, 1, 0, -1, 1, -1, 0, 0
     };
+    private static final float[] CYLINDER = CylinderMesh.vertices(32);
     private final RenderSettings settings;
     private int vao, vbo, program, post, framebuffer, displayFramebuffer, sceneTexture, displayTexture, depth, width,
             height;
     private Texture2D checker;
+    private World visibilityWorld;
+    private final java.util.Map<dev.aether.ecs.Entity, Float> cutawayProgress = new java.util.LinkedHashMap<>();
+    private long previousRenderNanos;
 
     public OpenGlRenderer(RenderSettings settings) {
         this.settings = Objects.requireNonNull(settings, "settings");
@@ -47,6 +51,22 @@ public final class OpenGlRenderer implements AutoCloseable {
             return displayTexture;
         if (program == 0)
             init();
+        if (visibilityWorld != world) {
+            visibilityWorld = world;
+            cutawayProgress.clear();
+            previousRenderNanos = 0;
+        }
+        long now = System.nanoTime();
+        double elapsed = previousRenderNanos == 0 ? 0 : (now - previousRenderNanos) / 1_000_000_000.0;
+        previousRenderNanos = now;
+        var obstructing = CutawayVisibility.obstructing(world, projection, view);
+        var surfaces = world.view(CutawaySurface.class);
+        cutawayProgress.keySet().retainAll(surfaces.keySet());
+        for (var surface : surfaces.entrySet()) {
+            float desired = obstructing.contains(surface.getKey()) ? 1 : 0;
+            float current = cutawayProgress.getOrDefault(surface.getKey(), desired);
+            cutawayProgress.put(surface.getKey(), CutawayVisibility.approach(current, desired, elapsed));
+        }
         resize(requestedWidth, requestedHeight);
         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
         glViewport(0, 0, width, height);
@@ -65,6 +85,12 @@ public final class OpenGlRenderer implements AutoCloseable {
             Transform transform = world.get(entry.getKey(), Transform.class).orElse(null);
             if (transform == null)
                 continue;
+            CutawaySurface surface = surfaces.get(entry.getKey());
+            if (surface != null) {
+                transform = CutawayGeometry.lowered(transform, surface.remainingHeight(),
+                        cutawayProgress.getOrDefault(entry.getKey(), 0f));
+                if (transform.scale().y() == 0) continue;
+            }
             Matrix4f model = model(transform);
             try (MemoryStack stack = MemoryStack.stackPush()) {
                 FloatBuffer b = stack.mallocFloat(16);
@@ -79,7 +105,10 @@ public final class OpenGlRenderer implements AutoCloseable {
             glUniform3f(glGetUniformLocation(program, "tint"), (float) color.x(), (float) color.y(), (float) color.z());
             glUniform1f(glGetUniformLocation(program, "emissive"),
                     (float) material.emissive());
-            glDrawArrays(GL_TRIANGLES, 0, 36);
+            if (entry.getValue().meshId().equals("primitive/cylinder"))
+                glDrawArrays(GL_TRIANGLES, CUBE.length / 5, CYLINDER.length / 5);
+            else
+                glDrawArrays(GL_TRIANGLES, 0, CUBE.length / 5);
         }
         glBindFramebuffer(GL_FRAMEBUFFER, displayFramebuffer);
         glViewport(0, 0, width, height);
@@ -120,7 +149,9 @@ public final class OpenGlRenderer implements AutoCloseable {
         vbo = glGenBuffers();
         glBindVertexArray(vao);
         glBindBuffer(GL_ARRAY_BUFFER, vbo);
-        glBufferData(GL_ARRAY_BUFFER, CUBE, GL_STATIC_DRAW);
+        float[] vertices = java.util.Arrays.copyOf(CUBE, CUBE.length + CYLINDER.length);
+        System.arraycopy(CYLINDER, 0, vertices, CUBE.length, CYLINDER.length);
+        glBufferData(GL_ARRAY_BUFFER, vertices, GL_STATIC_DRAW);
         glVertexAttribPointer(0, 3, GL_FLOAT, false, 5 * Float.BYTES, 0);
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(1, 2, GL_FLOAT, false, 5 * Float.BYTES, 3L * Float.BYTES);
@@ -189,6 +220,9 @@ public final class OpenGlRenderer implements AutoCloseable {
 
     @Override
     public void close() {
+        visibilityWorld = null;
+        cutawayProgress.clear();
+        previousRenderNanos = 0;
         if (checker != null)
             checker.close();
         if (depth != 0)
