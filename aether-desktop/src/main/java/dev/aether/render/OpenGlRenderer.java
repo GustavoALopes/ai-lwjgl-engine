@@ -1,6 +1,7 @@
 package dev.aether.render;
 
 import dev.aether.ecs.World;
+import dev.aether.game.GamePresentation;
 import dev.aether.math.Vec3;
 import dev.aether.scene.Transform;
 import java.nio.FloatBuffer;
@@ -27,7 +28,9 @@ public final class OpenGlRenderer implements AutoCloseable {
     };
     private static final float[] CYLINDER = CylinderMesh.vertices(32);
     private final RenderSettings settings;
-    private int vao, vbo, program, post, framebuffer, displayFramebuffer, sceneTexture, displayTexture, depth, width,
+    private final NanoVgHudRenderer hud = new NanoVgHudRenderer();
+    private boolean closed;
+    private int vao, vbo, program, post, framebuffer, displayFramebuffer, sceneTexture, displayTexture, depth, displayStencil, width,
             height;
     private Texture2D checker;
     private World visibilityWorld;
@@ -44,7 +47,17 @@ public final class OpenGlRenderer implements AutoCloseable {
 
     /** Requires an active render context and returns the frame texture. */
     public int renderScene(World world, int requestedWidth, int requestedHeight, Matrix4f projection, Matrix4f view) {
+        return renderScene(world, requestedWidth, requestedHeight, projection, view, GamePresentation.empty(), 1);
+    }
+
+    /** Physical target dimensions and logical-to-physical pixel ratio; HUD is composed after tone mapping. */
+    public int renderScene(World world, int requestedWidth, int requestedHeight, Matrix4f projection, Matrix4f view,
+                           GamePresentation presentation, float pixelRatio) {
+        if (closed) throw new IllegalStateException("Renderer is closed");
         Objects.requireNonNull(world, "world");
+        Objects.requireNonNull(presentation, "presentation");
+        if (!Float.isFinite(pixelRatio) || pixelRatio <= 0)
+            throw new IllegalArgumentException("Pixel ratio must be positive and finite");
         Objects.requireNonNull(projection, "projection");
         Objects.requireNonNull(view, "view");
         if (requestedWidth < 1 || requestedHeight < 1)
@@ -70,6 +83,9 @@ public final class OpenGlRenderer implements AutoCloseable {
         resize(requestedWidth, requestedHeight);
         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
         glViewport(0, 0, width, height);
+        resetOverlayState();
+        glDepthMask(true);
+        glColorMask(true, true, true, true);
         glEnable(GL_DEPTH_TEST);
         glClearColor(.035f, .055f, .09f, 1);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -121,10 +137,31 @@ public final class OpenGlRenderer implements AutoCloseable {
         glUniform1f(glGetUniformLocation(post, "exposure"), (float) settings.exposure());
         glUniform1i(glGetUniformLocation(post, "hdr"), settings.hdr() ? 1 : 0);
         glDrawArrays(GL_TRIANGLES, 0, 3);
+        if (!presentation.stats().isEmpty()) {
+            glStencilMask(0xFF);
+            glClearStencil(0);
+            glClear(GL_STENCIL_BUFFER_BIT);
+            try {
+                hud.render(presentation, width / pixelRatio, height / pixelRatio, pixelRatio);
+            } finally {
+                resetOverlayState();
+                glBindVertexArray(0);
+                glUseProgram(0);
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            }
+        }
         glBindVertexArray(0);
         glUseProgram(0);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         return displayTexture;
+    }
+
+    private static void resetOverlayState() {
+        glDisable(GL_STENCIL_TEST);
+        glDisable(GL_SCISSOR_TEST);
+        glDisable(GL_BLEND);
+        glDisable(GL_CULL_FACE);
+        glActiveTexture(GL_TEXTURE0);
     }
 
     private Matrix4f model(Transform t) {
@@ -166,6 +203,7 @@ public final class OpenGlRenderer implements AutoCloseable {
         sceneTexture = glGenTextures();
         displayTexture = glGenTextures();
         depth = glGenRenderbuffers();
+        displayStencil = glGenRenderbuffers();
         checker = Texture2D.checkerboard();
     }
 
@@ -188,6 +226,9 @@ public final class OpenGlRenderer implements AutoCloseable {
         checkFramebuffer("Scene");
         glBindFramebuffer(GL_FRAMEBUFFER, displayFramebuffer);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, displayTexture, 0);
+        glBindRenderbuffer(GL_RENDERBUFFER, displayStencil);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_STENCIL_INDEX8, width, height);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER, displayStencil);
         checkFramebuffer("Display");
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
@@ -220,6 +261,9 @@ public final class OpenGlRenderer implements AutoCloseable {
 
     @Override
     public void close() {
+        if (closed) return;
+        closed = true;
+        hud.close();
         visibilityWorld = null;
         cutawayProgress.clear();
         previousRenderNanos = 0;
@@ -227,6 +271,8 @@ public final class OpenGlRenderer implements AutoCloseable {
             checker.close();
         if (depth != 0)
             glDeleteRenderbuffers(depth);
+        if (displayStencil != 0)
+            glDeleteRenderbuffers(displayStencil);
         if (sceneTexture != 0)
             glDeleteTextures(sceneTexture);
         if (displayTexture != 0)

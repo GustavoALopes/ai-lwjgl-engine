@@ -503,8 +503,11 @@ public final class EditorShell implements DesktopApplication {
                 : java.util.Optional.<CameraMatrices.Frame>empty();
         viewportProjection = gameCamera.map(CameraMatrices.Frame::projection).orElseGet(() -> projection(viewportWidth, viewportHeight));
         viewportView = gameCamera.map(CameraMatrices.Frame::view).orElseGet(this::viewMatrix);
-        int texture = renderer.renderScene(world, Math.max(1, (int) viewportWidth), Math.max(1, (int) viewportHeight),
-                viewportProjection, viewportView);
+        GamePresentation presentation = projects.presentation();
+        float pixelRatio = ImGui.getIO().getDisplayFramebufferScaleX();
+        int texture = renderer.renderScene(world, Math.max(1, Math.round(viewportWidth * pixelRatio)),
+                Math.max(1, Math.round(viewportHeight * pixelRatio)),
+                viewportProjection, viewportView, presentation, pixelRatio);
         ImGui.image(texture, viewportWidth, viewportHeight, 0, 1, 1, 0);
         float left = ImGui.getItemRectMinX(), top = ImGui.getItemRectMinY();
         boolean hovered = ImGui.isItemHovered();
@@ -517,7 +520,6 @@ public final class EditorShell implements DesktopApplication {
                 selected = hit;
         }
         if (!gameView) drawGizmo(world, left, top, viewportWidth, viewportHeight);
-        GamePresentation presentation = projects.presentation();
         drawGameHud(left, top, viewportWidth, viewportHeight, presentation);
         if (!presentation.controls().isBlank())
             ImGui.textColored(.35f, .9f, 1f, 1f, presentation.controls());

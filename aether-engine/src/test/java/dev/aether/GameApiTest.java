@@ -41,4 +41,19 @@ class GameApiTest {
         assertThrows(IllegalArgumentException.class, () -> new Material(new Vec3(0, Double.NaN, 0), 0));
         assertThrows(IllegalArgumentException.class, () -> new Material(Vec3.ZERO, Double.POSITIVE_INFINITY));
     }
+
+    @Test void statSnapshotsAreDefensiveAndOldPresentationsRemainSupported() {
+        var stats = new ArrayList<GamePresentation.Stat>();
+        stats.add(new GamePresentation.Stat(GamePresentation.Anchor.TOP_LEFT, "STAGE", "01"));
+        var presentation = new GamePresentation(GamePresentation.ViewMode.THREE_D, java.util.List.of(), "", stats);
+        stats.clear();
+        assertEquals(1, presentation.stats().size());
+        assertThrows(UnsupportedOperationException.class, () -> presentation.stats().clear());
+        assertTrue(GamePresentation.empty().stats().isEmpty());
+        assertTrue(new GamePresentation(GamePresentation.ViewMode.TWO_D, java.util.List.of(), "").stats().isEmpty());
+        assertThrows(NullPointerException.class, () -> new GamePresentation.Stat(null, "STAGE", "01"));
+        assertThrows(NullPointerException.class, () -> new GamePresentation.Stat(GamePresentation.Anchor.TOP_LEFT, null, "01"));
+        assertThrows(IllegalArgumentException.class, () -> new GamePresentation.Stat(GamePresentation.Anchor.TOP_LEFT, " ", "01"));
+        assertThrows(IllegalArgumentException.class, () -> new GamePresentation.Stat(GamePresentation.Anchor.TOP_LEFT, "STAGE", ""));
+    }
 }

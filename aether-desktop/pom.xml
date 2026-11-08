@@ -17,6 +17,7 @@
         <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-opengl</artifactId></dependency>
         <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-openal</artifactId></dependency>
         <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-stb</artifactId></dependency>
+        <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-nanovg</artifactId></dependency>
         <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-assimp</artifactId></dependency>
         <dependency><groupId>org.joml</groupId><artifactId>joml</artifactId></dependency>
         <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
@@ -30,6 +31,7 @@
         <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-glfw</artifactId><classifier>natives-windows</classifier><scope>runtime</scope></dependency>
         <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-opengl</artifactId><classifier>natives-windows</classifier><scope>runtime</scope></dependency>
         <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-stb</artifactId><classifier>natives-windows</classifier><scope>runtime</scope></dependency>
+        <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-nanovg</artifactId><classifier>natives-windows</classifier><scope>runtime</scope></dependency>
             </dependencies>
         </profile>
         <profile>
@@ -40,6 +42,7 @@
         <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-glfw</artifactId><classifier>natives-linux</classifier><scope>runtime</scope></dependency>
         <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-opengl</artifactId><classifier>natives-linux</classifier><scope>runtime</scope></dependency>
         <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-stb</artifactId><classifier>natives-linux</classifier><scope>runtime</scope></dependency>
+        <dependency><groupId>org.lwjgl</groupId><artifactId>lwjgl-nanovg</artifactId><classifier>natives-linux</classifier><scope>runtime</scope></dependency>
             </dependencies>
         </profile>
         <profile>

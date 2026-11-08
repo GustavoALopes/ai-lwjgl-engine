@@ -53,6 +53,17 @@ The editor sends keyboard input to the focused Scene View, suspends delivery whi
 
 Override `presentation()` to return a `GamePresentation`: a default 2D/3D view mode, immutable HUD labels, and a controls hint. Label positions use normalized viewport coordinates in `[0, 1]`; colors use `0xRRGGBBAA`. The editor draws these generic labels over the game viewport. The game never imports ImGui.
 
+Presentations can also supply immutable `Stat(anchor, label, value)` cards using
+`Anchor.TOP_LEFT` or `TOP_CENTER`. Derive their display values from game state in
+`presentation()`; drawing never changes simulation state. The desktop NanoVG
+adapter composes rounded cards in screen space after scene tone mapping, using
+the display framebuffer's stencil attachment. Layout uses logical pixels with
+DPI scaling. The three-argument presentation constructor remains supported.
+Fonts and NanoVG resources belong to the renderer and are released before the
+OpenGL context closes. Normal tests stay headless; run
+`mvn -pl aether-desktop -am test -Daether.test.opengl=true` to check the adapter
+with a hidden OpenGL window and produce `aether-desktop/target/hud-preview.png`.
+
 `Material` is an immutable ECS component supplying a linear RGB tint and emissive intensity. HDR colors can exceed one. Game-specific material IDs and color palettes stay in the game project.
 
 ## Game cameras and cutaway surfaces
