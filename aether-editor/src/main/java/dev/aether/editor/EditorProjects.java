@@ -150,6 +150,9 @@ public final class EditorProjects implements AutoCloseable {
             error = failure.getMessage();
         } finally {
             if (previous != activeSession().orElse(null)) {
+                activeSession().map(ProjectSession::engine)
+                        .filter(engine -> engine.state() == AetherEngine.State.RUNNING)
+                        .ifPresent(AetherEngine::pause);
                 dirty = false;
                 activeSession().flatMap(ProjectSession::project).ifPresent(project -> {
                     var next = new ArrayList<>(recent);

@@ -14,6 +14,21 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.*;
 
 class EditorProjectsTest {
+    @Test void initialSceneWaitsForResumeBeforeUpdating() {
+        try (var projects = new EditorProjects()) {
+            var session = projects.activeSession().orElseThrow();
+            int[] updates = {0};
+            session.world().addSystem((world, dt) -> updates[0]++);
+            assertEquals(AetherEngine.State.PAUSED, session.engine().state());
+            projects.update(1);
+            assertEquals(0, updates[0]);
+            session.engine().resume();
+            projects.update(1);
+            assertEquals(1, updates[0]);
+            assertEquals(AetherEngine.State.RUNNING, session.engine().state());
+        }
+    }
+
     @Test void projectCreationWaitsForDiscardAndUpdatesImmutableRecentHistory() {
         Path file = temporary.resolve("created/Game.aetherproj");
         try (var projects = new EditorProjects()) {
@@ -27,10 +42,12 @@ class EditorProjectsTest {
             projects.discardAndContinue();
             projects.update(0);
             assertTrue(Files.exists(file));
+            assertEquals(AetherEngine.State.PAUSED, projects.activeSession().orElseThrow().engine().state());
             assertEquals(java.util.List.of(file.toAbsolutePath()), projects.recentProjects());
             assertThrows(UnsupportedOperationException.class, () -> projects.recentProjects().clear());
             projects.requestReload();
             projects.update(0);
+            assertEquals(AetherEngine.State.PAUSED, projects.activeSession().orElseThrow().engine().state());
             assertEquals(1, projects.recentProjects().size());
         }
     }
@@ -56,6 +73,7 @@ class EditorProjectsTest {
             ProjectSession original = projects.activeSession().orElseThrow();
             int[] updates = {0};
             original.world().addSystem((world, dt) -> updates[0]++);
+            original.engine().resume();
             projects.update(0);
             projects.requestNewScene();
             assertSame(original, projects.activeSession().orElseThrow());
@@ -63,6 +81,7 @@ class EditorProjectsTest {
             assertEquals(ProjectSession.State.CLOSED, original.state());
             assertEquals(1, updates[0]);
             assertEquals(0, projects.activeSession().orElseThrow().world().entityCount());
+            assertEquals(AetherEngine.State.PAUSED, projects.activeSession().orElseThrow().engine().state());
         }
     }
 
@@ -159,17 +178,20 @@ class EditorProjectsTest {
         assertDoesNotThrow(projects::close);
     }
 
-    @Test void pausedSessionStaysPausedOnFailedOpenAndNewSessionStartsRunning() throws IOException {
+    @Test void pausedSessionStaysPausedOnFailedOpenAndNewSessionStartsPaused() throws IOException {
         try (var projects = new EditorProjects()) {
             var original = projects.activeSession().orElseThrow();
-            original.engine().pause();
+            int[] updates = {0};
+            original.world().addSystem((world, dt) -> updates[0]++);
             projects.requestOpen(temporary.resolve("missing.aetherproj"));
             projects.update(1);
             assertEquals(AetherEngine.State.PAUSED, original.engine().state());
+            assertEquals(0, updates[0]);
+            original.engine().resume();
             projects.requestOpen(manifest());
-            projects.update(0);
+            projects.update(1);
             assertEquals(AetherEngine.State.CLOSED, original.engine().state());
-            assertEquals(AetherEngine.State.RUNNING, projects.activeSession().orElseThrow().engine().state());
+            assertEquals(AetherEngine.State.PAUSED, projects.activeSession().orElseThrow().engine().state());
             assertTrue(projects.error().isEmpty());
         }
     }
@@ -181,6 +203,7 @@ class EditorProjectsTest {
             projects.requestNewScene();
             projects.update(0);
             assertNotSame(previous, projects.activeSession().orElseThrow());
+            assertEquals(AetherEngine.State.PAUSED, projects.activeSession().orElseThrow().engine().state());
             assertEquals(0, projects.activeSession().orElseThrow().world().entityCount());
             assertTrue(projects.error().isPresent());
         }
@@ -190,12 +213,13 @@ class EditorProjectsTest {
         try (var projects = new EditorProjects()) {
             var session = projects.activeSession().orElseThrow();
             session.world().addSystem((world, dt) -> { throw new IllegalArgumentException("bad game"); });
+            session.engine().resume();
             projects.update(0);
             assertEquals(AetherEngine.State.PAUSED, session.engine().state());
             assertTrue(projects.error().orElseThrow().contains("bad game"));
             projects.requestNewScene();
             projects.update(0);
-            assertEquals(AetherEngine.State.RUNNING, projects.activeSession().orElseThrow().engine().state());
+            assertEquals(AetherEngine.State.PAUSED, projects.activeSession().orElseThrow().engine().state());
         }
     }
 
@@ -216,6 +240,7 @@ class EditorProjectsTest {
             ProjectSession original = projects.activeSession().orElseThrow();
             original.world().addSystem((world, dt) ->
                     assertThrows(IllegalStateException.class, projects::close));
+            original.engine().resume();
             projects.update(0);
             assertEquals(ProjectSession.State.ACTIVE, original.state());
         }
