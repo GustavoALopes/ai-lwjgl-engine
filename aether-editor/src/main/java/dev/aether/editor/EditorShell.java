@@ -15,6 +15,7 @@ import dev.aether.scene.Transform;
 import dev.aether.scene.Tags;
 import imgui.ImGui;
 import imgui.ImDrawList;
+import imgui.extension.imguizmo.ImGuizmo;
 import imgui.flag.ImGuiCond;
 import imgui.flag.ImGuiTreeNodeFlags;
 import imgui.flag.ImGuiWindowFlags;
@@ -37,6 +38,7 @@ import java.util.Objects;
 import java.util.EnumSet;
 import java.util.List;
 import static org.lwjgl.glfw.GLFW.*;
+import org.lwjgl.system.MemoryStack;
 
 /**
  * ImGui editor host. All controls operate through the public ECS surface, which
@@ -60,12 +62,6 @@ public final class EditorShell implements DesktopApplication {
     private Entity inspectorEntity;
     private final ImString inspectorName = new ImString(128);
     private final ImString inspectorTags = new ImString(256);
-    private Entity draggingEntity;
-    private Vec3 dragStartPosition;
-    private Vec3 dragStartScale;
-    private float dragStartMouseX;
-    private float dragStartMouseY;
-    private Axis dragAxis;
     private TransformMode transformMode = TransformMode.TRANSLATE;
     private boolean showDemo = true;
     private SceneCamera sceneCamera = SceneCamera.defaultCamera();
@@ -85,6 +81,8 @@ public final class EditorShell implements DesktopApplication {
     private Path assetDirectory = Path.of(".");
     private List<AssetCatalog.Entry> assets = List.of();
     private String assetError;
+    private String modelImportError;
+    private final ModelAssetDrag modelDrag = new ModelAssetDrag();
     private boolean openSceneShortcutHeld;
     private boolean newSceneShortcutHeld;
     private boolean playShortcutHeld;
@@ -143,6 +141,7 @@ public final class EditorShell implements DesktopApplication {
             window.requestClose();
         glfw.newFrame();
         ImGui.newFrame();
+        ImGuizmo.beginFrame();
         handleOpenSceneShortcut(window);
         if (engine != null)
             handlePlayPauseShortcuts(window, engine);
@@ -163,6 +162,12 @@ public final class EditorShell implements DesktopApplication {
         drawAssets();
         drawConsole(world);
         ImGui.render();
+        try (var stack = MemoryStack.stackPush()) {
+            var framebufferWidth = stack.mallocInt(1);
+            var framebufferHeight = stack.mallocInt(1);
+            glfwGetFramebufferSize(window.handle(), framebufferWidth, framebufferHeight);
+            EditorFramebuffer.clear(framebufferWidth.get(0), framebufferHeight.get(0));
+        }
         gl3.renderDrawData(ImGui.getDrawData());
     }
 
@@ -218,13 +223,11 @@ public final class EditorShell implements DesktopApplication {
     }
 
     private void resetSessionView(ProjectSession session) {
+        renderer.releaseImportedModels();
         displayedSession = session;
         selected = null;
         inspectorEntity = null;
-        draggingEntity = null;
-        dragAxis = null;
-        dragStartPosition = null;
-        dragStartScale = null;
+        modelDrag.cancel();
         gameInput.reset();
         viewportFocused = false;
         hasPreviousSceneMouse = false;
@@ -237,6 +240,7 @@ public final class EditorShell implements DesktopApplication {
         assetDirectory = Path.of(".");
         assets = List.of();
         assetError = null;
+        modelImportError = null;
         if (session != null && session.project().isPresent()) {
             try {
                 assetCatalog = new AssetCatalog(session.assetDirectory());
@@ -400,25 +404,17 @@ public final class EditorShell implements DesktopApplication {
                 projects.markDirty();
             }
             ImGui.separator();
-            if (ImGui.button("Move"))
+            if (ImGui.button("Move##mode"))
                 transformMode = TransformMode.TRANSLATE;
             ImGui.sameLine();
-            if (ImGui.button("Scale"))
+            if (ImGui.button("Scale##mode"))
                 transformMode = TransformMode.SCALE;
             ImGui.sameLine();
             ImGui.textDisabled("Active: " + transformMode.label);
             world.get(selected, Transform.class).ifPresent(transform -> {
-                float[] position = { (float) transform.position().x(), (float) transform.position().y(),
-                        (float) transform.position().z() };
-                if (ImGui.dragFloat3("Position", position, .05f)) {
-                    world.add(selected,
-                            transform.withPosition(new dev.aether.math.Vec3(position[0], position[1], position[2])));
-                    projects.markDirty();
-                }
-                float[] scale = { (float) transform.scale().x(), (float) transform.scale().y(),
-                        (float) transform.scale().z() };
-                if (ImGui.dragFloat3("Scale", scale, .02f, .05f, 100f)) {
-                    world.add(selected, transform.withScale(new Vec3(scale[0], scale[1], scale[2])));
+                Transform edited = TransformControls.fields(transform);
+                if (!edited.equals(transform)) {
+                    world.add(selected, edited);
                     projects.markDirty();
                 }
                 ImGui.text("Transform Gizmo: " + transformMode.label);
@@ -490,8 +486,6 @@ public final class EditorShell implements DesktopApplication {
                 useEditorCamera = !useEditorCamera;
                 rightNavigating = middleNavigating = leftNavigating = false;
                 hasPreviousSceneMouse = false;
-                draggingEntity = null;
-                dragAxis = null;
             }
         }
         boolean gameView = hasGameCamera && !useEditorCamera;
@@ -510,16 +504,32 @@ public final class EditorShell implements DesktopApplication {
                 viewportProjection, viewportView, presentation, pixelRatio);
         ImGui.image(texture, viewportWidth, viewportHeight, 0, 1, 1, 0);
         float left = ImGui.getItemRectMinX(), top = ImGui.getItemRectMinY();
+        Path droppedPath = modelDrag.accept(displayedSession);
+        if (droppedPath != null) {
+            try {
+                Vec3 point = SceneDropPlacement.position(world, viewportProjection, viewportView,
+                        2 * (ImGui.getMousePosX() - left) / viewportWidth - 1,
+                        1 - 2 * (ImGui.getMousePosY() - top) / viewportHeight,
+                        !gameView && sceneViewMode == SceneViewMode.TWO_D);
+                selected = projects.importObj(droppedPath, point);
+                modelImportError = null;
+            } catch (IOException | RuntimeException | LinkageError failure) {
+                modelImportError = "Cannot import model: " + failure.getMessage();
+            }
+        }
         boolean hovered = ImGui.isItemHovered();
-        if (!gameView) navigateViewport(window, hovered);
-        if (hovered && ImGui.isMouseClicked(0) && !window.isKeyDown(GLFW_KEY_LEFT_ALT)
+        boolean gizmoCapturesPointer = drawGizmo(world, left, top, viewportWidth, viewportHeight,
+                !gameView && sceneViewMode == SceneViewMode.TWO_D,
+                hovered && !modelDrag.active() && !window.isKeyDown(GLFW_KEY_LEFT_ALT)
+                        && !window.isKeyDown(GLFW_KEY_RIGHT_ALT) && !rightNavigating && !middleNavigating);
+        if (!gameView && !gizmoCapturesPointer) navigateViewport(window, hovered);
+        if (hovered && !gizmoCapturesPointer && !modelDrag.active() && ImGui.isMouseClicked(0) && !window.isKeyDown(GLFW_KEY_LEFT_ALT)
                 && !window.isKeyDown(GLFW_KEY_RIGHT_ALT)) {
             Entity hit = pick(world, left, top, viewportWidth, viewportHeight, ImGui.getMousePosX(),
                     ImGui.getMousePosY());
             if (hit != null)
                 selected = hit;
         }
-        if (!gameView) drawGizmo(world, left, top, viewportWidth, viewportHeight);
         drawGameHud(left, top, viewportWidth, viewportHeight, presentation);
         if (!presentation.controls().isBlank())
             ImGui.textColored(.35f, .9f, 1f, 1f, presentation.controls());
@@ -615,64 +625,19 @@ public final class EditorShell implements DesktopApplication {
         return nearest;
     }
 
-    private void drawGizmo(World world, float left, float top, float width, float height) {
-        if (draggingEntity != null && !world.exists(draggingEntity)) {
-            draggingEntity = null;
-            dragAxis = null;
-        }
-        if (selected == null || !world.exists(selected))
-            return;
+    private boolean drawGizmo(World world, float left, float top, float width, float height,
+                              boolean orthographic, boolean enabled) {
+        if (selected == null || !world.exists(selected)) return false;
         Transform transform = world.get(selected, Transform.class).orElse(null);
-        if (transform == null)
-            return;
-        float[] point = project(transform.position(), left, top, width, height);
-        float x = point[0], y = point[1];
-        ImDrawList draw = ImGui.getWindowDrawList();
-        draw.addRect(x - 26, y - 26, x + 26, y + 26, 0xFFFFFFFF, 0, 0, 2);
-        draw.addLine(x, y, x + 54, y, 0xFF3030FF, 3);
-        draw.addLine(x, y, x, y - 54, 0xFF30FF30, 3);
-        draw.addText(x + 57, y - 8, 0xFF3030FF, transformMode == TransformMode.TRANSLATE ? "X" : "Scale X");
-        draw.addText(x - 7, y - 70, 0xFF30FF30, transformMode == TransformMode.TRANSLATE ? "Y" : "Scale Y");
-        if (ImGui.isMouseClicked(0)) {
-            float mouseX = ImGui.getMousePosX(), mouseY = ImGui.getMousePosY();
-            if (Math.abs(mouseY - y) < 14 && mouseX >= x && mouseX <= x + 64)
-                beginDrag(Axis.X, transform);
-            else if (Math.abs(mouseX - x) < 14 && mouseY <= y && mouseY >= y - 64)
-                beginDrag(Axis.Y, transform);
+        if (transform == null) return false;
+        var result = TransformControls.gizmo(transform, viewportView, viewportProjection,
+                left, top, width, height, transformMode == TransformMode.SCALE, orthographic,
+                enabled || ImGuizmo.isUsing());
+        if (!result.transform().equals(transform)) {
+            world.add(selected, result.transform());
+            projects.markDirty();
         }
-        if (draggingEntity != null) {
-            if (ImGui.isMouseDown(0)) {
-                double delta = dragAxis == Axis.X ? (ImGui.getMousePosX() - dragStartMouseX) / 50d
-                        : (dragStartMouseY - ImGui.getMousePosY()) / 50d;
-                if (delta != 0)
-                    projects.markDirty();
-                Vec3 start = dragStartPosition;
-                if (transformMode == TransformMode.TRANSLATE) {
-                    Vec3 position = dragAxis == Axis.X ? new Vec3(start.x() + delta, start.y(), start.z())
-                            : new Vec3(start.x(), start.y() + delta, start.z());
-                    world.add(draggingEntity, transform.withPosition(position));
-                } else {
-                    Vec3 scale = dragAxis == Axis.X
-                            ? new Vec3(Math.max(.05, dragStartScale.x() + delta), dragStartScale.y(),
-                                    dragStartScale.z())
-                            : new Vec3(dragStartScale.x(), Math.max(.05, dragStartScale.y() + delta),
-                                    dragStartScale.z());
-                    world.add(draggingEntity, transform.withScale(scale));
-                }
-            } else {
-                draggingEntity = null;
-                dragAxis = null;
-            }
-        }
-    }
-
-    private void beginDrag(Axis axis, Transform transform) {
-        draggingEntity = selected;
-        dragAxis = axis;
-        dragStartPosition = transform.position();
-        dragStartScale = transform.scale();
-        dragStartMouseX = ImGui.getMousePosX();
-        dragStartMouseY = ImGui.getMousePosY();
+        return result.capturesPointer();
     }
 
     private Matrix4f projection(float width, float height) {
@@ -692,10 +657,6 @@ public final class EditorShell implements DesktopApplication {
                 .transform(new Vector4f((float) position.x(), (float) position.y(), (float) position.z(), 1));
         float ndcX = clip.x / clip.w, ndcY = clip.y / clip.w;
         return new float[] { left + (ndcX * .5f + .5f) * width, top + (1 - (ndcY * .5f + .5f)) * height };
-    }
-
-    private enum Axis {
-        X, Y
     }
 
     private enum SceneViewMode {
@@ -733,12 +694,18 @@ public final class EditorShell implements DesktopApplication {
                         refreshAssets();
                     }
                 } else {
-                    ImGui.bulletText(asset.path().getFileName().toString());
+                    String name = asset.path().getFileName().toString();
+                    ImGui.selectable(name);
+                    if (name.toLowerCase(java.util.Locale.ROOT).endsWith(".obj"))
+                        modelDrag.source(displayedSession, asset.path());
                 }
             }
             if (assetError != null) ImGui.textWrapped(assetError);
+            ImGui.textWrapped("Drag an .obj into Scene View to add a model.");
+            if (modelImportError != null) ImGui.textWrapped(modelImportError);
         }
         ImGui.end();
+        if (!ImGui.isMouseDown(0)) modelDrag.cancel();
     }
 
     private void refreshAssets() {
@@ -761,6 +728,7 @@ public final class EditorShell implements DesktopApplication {
                 .orElse(projects.activeSession().isPresent() ? "Untitled scene" : "No project open"));
         ImGui.text("Scene: " + world.entityCount() + " entities" + (projects.dirty() ? " *" : ""));
         projects.error().ifPresent(error -> ImGui.textWrapped("[Project] " + error));
+        if (modelImportError != null) ImGui.textWrapped("[Import] " + modelImportError);
         ImGui.text("Physics + script systems enabled");
         ImGui.end();
     }

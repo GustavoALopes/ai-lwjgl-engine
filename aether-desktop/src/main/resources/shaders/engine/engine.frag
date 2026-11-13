@@ -12,6 +12,7 @@ uniform float emissive;
 uniform int ssao;
 uniform int shadows;
 uniform int ibl;
+uniform int importedModel;
 
 void main() {
     vec3 N = normalize(n);
@@ -27,6 +28,6 @@ void main() {
     if (ssao == 1)
         ao = 1.0 - 0.38 * exp(-dot(w.xz - vec2(0.05, 1.2), w.xz - vec2(0.05, 1.2)) * 2.8)
                 * smoothstep(-1.3, -0.8, w.y);
-    vec3 albedo = texture(tex, vUv).rgb * tint;
+    vec3 albedo = importedModel == 1 ? tint : texture(tex, vUv).rgb * tint;
     c = vec4(albedo * (light * shadow * ao + env) + albedo * emissive, 1.0);
 }

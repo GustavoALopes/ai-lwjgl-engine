@@ -3,6 +3,11 @@ package dev.aether.editor;
 import dev.aether.game.GameInput;
 import dev.aether.game.GamePresentation;
 import dev.aether.core.AetherEngine;
+import dev.aether.ecs.Entity;
+import dev.aether.math.Vec3;
+import dev.aether.render.MeshRenderer;
+import dev.aether.render.ObjModelLoader;
+import dev.aether.scene.Transform;
 import dev.aether.project.ProjectManager;
 import dev.aether.project.ProjectSession;
 import java.io.IOException;
@@ -44,6 +49,39 @@ public final class EditorProjects implements AutoCloseable {
             confirmation = pending;
             pending = null;
         }
+    }
+
+    /** Imports before mutating the world, so failed drops leave the scene untouched. */
+    public Entity importObj(Path relativePath, Vec3 surface) throws IOException {
+        requireOpen();
+        Objects.requireNonNull(relativePath, "relativePath");
+        Objects.requireNonNull(surface, "surface");
+        if (!Double.isFinite(surface.x()) || !Double.isFinite(surface.y()) || !Double.isFinite(surface.z()))
+            throw new IllegalArgumentException("Placement must be finite");
+        ProjectSession session = activeSession().filter(s -> s.project().isPresent())
+                .orElseThrow(() -> new IllegalStateException("Open a project to import models"));
+        if (session.world().isUpdating()) throw new IllegalStateException("Cannot import during a world update");
+        if (relativePath.isAbsolute() || relativePath.normalize().startsWith(".."))
+            throw new IllegalArgumentException("Model must be inside project assets");
+        Path root = session.assetDirectory().toRealPath();
+        Path file = root.resolve(relativePath).toRealPath();
+        if (!file.startsWith(root)) throw new IOException("Model resolves outside project assets");
+        var model = ObjModelLoader.load(file);
+        String name = file.getFileName().toString();
+        String baseName = name.substring(0, name.lastIndexOf('.'));
+        if (baseName.isBlank()) baseName = "Model";
+        var names = new java.util.HashSet<String>();
+        for (var existing : session.world().entities()) names.add(session.world().nameOf(existing));
+        name = baseName;
+        for (int suffix = 1; names.contains(name); suffix++) name = baseName + " (" + suffix + ")";
+        var entity = session.world().create(name);
+        session.world().add(entity, Transform.identity().withPosition(
+                new Vec3(surface.x(), surface.y() - model.minimumY(), surface.z())));
+        session.world().add(entity, new MeshRenderer(
+                relativePath.normalize().toString().replace('\\', '/'), "imported/obj"));
+        session.world().add(entity, model);
+        markDirty();
+        return entity;
     }
 
     public void requestOpen(Path path) {

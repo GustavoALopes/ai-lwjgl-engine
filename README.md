@@ -43,7 +43,7 @@ Build with `mvn install`, then use **File > Open Project...** or **Ctrl+O** and 
 
 **New Project** creates a minimal manifest and assets directory without overwriting an existing manifest. **Recent Projects** keeps the last ten opened projects for this editor run. **Reload Project** rereads the manifest/JAR, and **Close Project** releases the session. **New Scene** creates an empty world within the current project; Reload restores its declared module. Each replacement uses a fresh engine/world and module class loader.
 
-The Asset Browser lists files and directories from the active project's asset root, with folder navigation and Refresh. Game input, HUD data, and material colors come from the game module through public engine APIs.
+The Asset Browser lists files and directories from the active project's asset root, with folder navigation and Refresh. Drag an `.obj` file into Scene View to import and select it. Keep its `.mtl` file beside it for diffuse material colors. Imported models support geometry, UVs, and normals; texture maps and material transparency are not rendered yet. Game input, HUD data, and material colors come from the game module through public engine APIs.
 
 Editor scene edits trigger a discard/cancel prompt before opening, closing, resetting, or quitting. Scene saving is not implemented, so Open Scene and Save Scene remain disabled. Failed project opens preserve the current scene and report their error in Console.
 

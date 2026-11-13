@@ -125,6 +125,10 @@ This loads and initializes the actual game JAR, dispatches an empty input snapsh
 
 ## Asset browser and remaining work
 
-The Asset Browser reads directory snapshots from the active project's asset root. It lists directories first in a stable order, supports folder navigation and refresh, and skips symbolic-link entries. It does not import assets or create GPU objects.
+The Asset Browser reads directory snapshots from the active project's asset root. It lists directories first in a stable order, supports folder navigation and refresh, and skips symbolic-link entries. Drag an `.obj` entry onto the Scene View image to create a selected, editable model entity at the cursor. Placement uses scene surfaces (excluding cutaway walls), with a ground-plane fallback. The model's lowest vertex rests at the hit height. Primitive cylinders use their bounding boxes for placement.
+
+OBJ loading uses Assimp in the desktop adapter, triangulates polygons, generates missing normals, and reads diffuse colors from sibling `.mtl` files. UVs are retained; texture maps, transparency, and automatic file watching are not implemented. Import errors appear in Asset Browser and Console without creating a partial entity. Each drop creates an independent instance. The entity has `Transform`, `MeshRenderer` (asset-relative source path), and immutable `ModelMesh` CPU geometry. GPU objects are created only during rendering and released on entity removal, project replacement/close, or renderer shutdown. The core remains independent of Assimp and OpenGL.
+
+The Inspector's **Move** and **Scale** buttons select three-axis viewport handles. They work with either Game Camera or Editor Camera using the active projection. Drag an axis handle to move or resize the selected model, or drag the Inspector's numeric Position and Scale fields. Gizmo interaction takes priority over scene picking; camera navigation and asset drags do not start transform edits. Each asset drag creates an entity only on release over Scene View.
 
 Scene serialization, a separate cloned Play world, persistent editor preferences/recent history, automatic game builds, and richer mouse/controller/UI APIs remain future extensions.

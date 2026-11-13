@@ -36,6 +36,46 @@ public final class OpenGlRenderer implements AutoCloseable {
     private World visibilityWorld;
     private final java.util.Map<dev.aether.ecs.Entity, Float> cutawayProgress = new java.util.LinkedHashMap<>();
     private long previousRenderNanos;
+    private final java.util.Map<ModelMesh, java.util.List<GpuPart>> models = new java.util.IdentityHashMap<>();
+
+    private record GpuPart(int vao, int vbo, int count, Vec3 color) {
+        void release() { glDeleteBuffers(vbo); glDeleteVertexArrays(vao); }
+    }
+
+    private java.util.List<GpuPart> upload(ModelMesh mesh) {
+        var result = new java.util.ArrayList<GpuPart>();
+        try {
+            for (var part : mesh.parts()) {
+                int vertexArray = glGenVertexArrays(), buffer = glGenBuffers();
+                result.add(new GpuPart(vertexArray, buffer, part.vertexCount(), part.color()));
+                glBindVertexArray(vertexArray);
+                glBindBuffer(GL_ARRAY_BUFFER, buffer);
+                glBufferData(GL_ARRAY_BUFFER, part.vertices(), GL_STATIC_DRAW);
+                for (int attribute = 0; attribute < 3; attribute++) {
+                    int offset = attribute == 0 ? 0 : attribute == 1 ? 3 : 5;
+                    glVertexAttribPointer(attribute, attribute == 1 ? 2 : 3, GL_FLOAT, false,
+                            8 * Float.BYTES, (long) offset * Float.BYTES);
+                    glEnableVertexAttribArray(attribute);
+                }
+            }
+            return java.util.List.copyOf(result);
+        } catch (RuntimeException | Error failure) {
+            result.forEach(GpuPart::release);
+            throw failure;
+        }
+    }
+
+    private void releaseModels() {
+        models.values().forEach(parts -> parts.forEach(GpuPart::release));
+        models.clear();
+    }
+
+    /** Release project geometry on session changes. Requires the owning render context. */
+    public void releaseImportedModels() {
+        releaseModels();
+        visibilityWorld = null;
+        cutawayProgress.clear();
+    }
 
     public OpenGlRenderer(RenderSettings settings) {
         this.settings = Objects.requireNonNull(settings, "settings");
@@ -65,6 +105,7 @@ public final class OpenGlRenderer implements AutoCloseable {
         if (program == 0)
             init();
         if (visibilityWorld != world) {
+            releaseModels();
             visibilityWorld = world;
             cutawayProgress.clear();
             previousRenderNanos = 0;
@@ -81,6 +122,13 @@ public final class OpenGlRenderer implements AutoCloseable {
             cutawayProgress.put(surface.getKey(), CutawayVisibility.approach(current, desired, elapsed));
         }
         resize(requestedWidth, requestedHeight);
+        var liveModels = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<ModelMesh, Boolean>());
+        liveModels.addAll(world.view(ModelMesh.class).values());
+        models.entrySet().removeIf(entry -> {
+            if (liveModels.contains(entry.getKey())) return false;
+            entry.getValue().forEach(GpuPart::release);
+            return true;
+        });
         glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
         glViewport(0, 0, width, height);
         resetOverlayState();
@@ -121,7 +169,17 @@ public final class OpenGlRenderer implements AutoCloseable {
             glUniform3f(glGetUniformLocation(program, "tint"), (float) color.x(), (float) color.y(), (float) color.z());
             glUniform1f(glGetUniformLocation(program, "emissive"),
                     (float) material.emissive());
-            if (entry.getValue().meshId().equals("primitive/cylinder"))
+            ModelMesh imported = world.get(entry.getKey(), ModelMesh.class).orElse(null);
+            glUniform1i(glGetUniformLocation(program, "importedModel"), imported == null ? 0 : 1);
+            if (imported != null) {
+                for (var part : models.computeIfAbsent(imported, this::upload)) {
+                    glBindVertexArray(part.vao());
+                    Vec3 tint = world.get(entry.getKey(), Material.class).isPresent() ? color : part.color();
+                    glUniform3f(glGetUniformLocation(program, "tint"), (float) tint.x(), (float) tint.y(), (float) tint.z());
+                    glDrawArrays(GL_TRIANGLES, 0, part.count());
+                }
+                glBindVertexArray(vao);
+            } else if (entry.getValue().meshId().equals("primitive/cylinder"))
                 glDrawArrays(GL_TRIANGLES, CUBE.length / 5, CYLINDER.length / 5);
             else
                 glDrawArrays(GL_TRIANGLES, 0, CUBE.length / 5);
@@ -263,6 +321,7 @@ public final class OpenGlRenderer implements AutoCloseable {
     public void close() {
         if (closed) return;
         closed = true;
+        releaseModels();
         hud.close();
         visibilityWorld = null;
         cutawayProgress.clear();

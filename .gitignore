@@ -1,3 +1,4 @@
 target/
+.lwjgl/
 .idea/
 *.iml
