@@ -2,6 +2,7 @@ package dev.aether.editor;
 
 import dev.aether.math.Vec3;
 import dev.aether.scene.Transform;
+import dev.aether.editor.TransformControls.TransformMode;
 import imgui.ImGui;
 import imgui.extension.imguizmo.ImGuizmo;
 import imgui.flag.ImGuiWindowFlags;
@@ -45,7 +46,7 @@ class TransformControlsTest {
 
     @Test void inspectorScaleDoesNotCollideWithModeButtonAndPositionPersists() {
         fieldsFrame(-100, -100, false);
-        float scaleY = fieldsY + ImGui.getFrameHeightWithSpacing() + 8;
+        float scaleY = fieldsY + 2 * ImGui.getFrameHeightWithSpacing() + 8;
         fieldsFrame(20, scaleY, false);
         fieldsFrame(20, scaleY, true);
         fieldsFrame(60, scaleY, true);
@@ -63,6 +64,10 @@ class TransformControlsTest {
     }
 
     private TransformControls.GizmoResult gizmoFrame(float x, float y, boolean down, boolean scale, boolean enabled) {
+        return gizmoFrame(x, y, down, scale ? TransformMode.SCALE : TransformMode.TRANSLATE, enabled);
+    }
+
+    private TransformControls.GizmoResult gizmoFrame(float x, float y, boolean down, TransformMode mode, boolean enabled) {
         ImGui.getIO().setMousePos(x, y);
         ImGui.getIO().setMouseDown(0, down);
         ImGui.newFrame();
@@ -74,7 +79,7 @@ class TransformControlsTest {
         var view = new Matrix4f().lookAt(0, 0, 10, 0, 0, 0, 0, 1, 0);
         var projection = new Matrix4f().perspective((float) Math.toRadians(55), 1.5f, .1f, 100);
         var result = TransformControls.gizmo(transform, view, projection, 0, 0, 600, 400,
-                scale, false, enabled);
+                mode, false, enabled);
         transform = result.transform();
         ImGui.end();
         ImGui.render();
@@ -106,5 +111,48 @@ class TransformControlsTest {
         assertFalse(result.capturesPointer());
         assertEquals(Transform.identity(), transform);
         gizmoFrame(380, 200, false, false, false);
+    }
+
+    @Test void inspectorRotationEditsDegreesAndPreservesPositionAndScale() {
+        transform = new Transform(new Vec3(2, 3, 4), Vec3.ZERO, new Vec3(-2, 3, 4));
+        fieldsFrame(-100, -100, false);
+        float rotationY = fieldsY + ImGui.getFrameHeightWithSpacing() + 8;
+        fieldsFrame(20, rotationY, false);
+        fieldsFrame(20, rotationY, true);
+        fieldsFrame(60, rotationY, true);
+        fieldsFrame(60, rotationY, false);
+        assertTrue(transform.rotationDegrees().x() > 0);
+        assertEquals(new Vec3(2, 3, 4), transform.position());
+        assertEquals(new Vec3(-2, 3, 4), transform.scale());
+    }
+
+    @Test void rotationRingChangesOrientationAndPreservesMirroredScale() {
+        transform = new Transform(Vec3.ZERO, new Vec3(20, 30, 10), new Vec3(-2, 3, 4));
+        Vec3 originalRotation = transform.rotationDegrees();
+        gizmoFrame(-100, -100, false, TransformMode.ROTATE, true);
+        // Find a visible ring on a diagonal, away from the overlapping axis handles.
+        float ringOffset = 0;
+        for (int offset = 20; offset <= 100; offset++) {
+            if (gizmoFrame(300 + offset, 200 - offset, false, TransformMode.ROTATE, true).capturesPointer()) {
+                ringOffset = offset;
+                break;
+            }
+        }
+        assertTrue(ringOffset > 0, "Rotation ring must capture the pointer");
+        gizmoFrame(300 + ringOffset, 200 - ringOffset, true, TransformMode.ROTATE, true);
+        gizmoFrame(300 + ringOffset, 200 + ringOffset, true, TransformMode.ROTATE, true);
+        gizmoFrame(300 + ringOffset, 200 + ringOffset, false, TransformMode.ROTATE, true);
+        assertNotEquals(originalRotation, transform.rotationDegrees());
+        assertEquals(Vec3.ZERO, transform.position());
+        assertEquals(new Vec3(-2, 3, 4), transform.scale());
+    }
+
+    @Test void disabledRotationDoesNotEditTheObject() {
+        Transform original = transform;
+        gizmoFrame(340, 160, false, TransformMode.ROTATE, false);
+        gizmoFrame(340, 160, true, TransformMode.ROTATE, false);
+        assertFalse(gizmoFrame(340, 240, true, TransformMode.ROTATE, false).capturesPointer());
+        gizmoFrame(340, 240, false, TransformMode.ROTATE, false);
+        assertEquals(original, transform);
     }
 }

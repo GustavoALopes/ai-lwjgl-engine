@@ -13,6 +13,7 @@ import dev.aether.script.Script;
 import dev.aether.script.ScriptComponent;
 import dev.aether.scene.Transform;
 import dev.aether.scene.Tags;
+import dev.aether.editor.TransformControls.TransformMode;
 import imgui.ImGui;
 import imgui.ImDrawList;
 import imgui.extension.imguizmo.ImGuizmo;
@@ -407,9 +408,11 @@ public final class EditorShell implements DesktopApplication {
             if (ImGui.button("Move##mode"))
                 transformMode = TransformMode.TRANSLATE;
             ImGui.sameLine();
+            if (ImGui.button("Rotate##mode"))
+                transformMode = TransformMode.ROTATE;
+            ImGui.sameLine();
             if (ImGui.button("Scale##mode"))
                 transformMode = TransformMode.SCALE;
-            ImGui.sameLine();
             ImGui.textDisabled("Active: " + transformMode.label);
             world.get(selected, Transform.class).ifPresent(transform -> {
                 Transform edited = TransformControls.fields(transform);
@@ -631,7 +634,7 @@ public final class EditorShell implements DesktopApplication {
         Transform transform = world.get(selected, Transform.class).orElse(null);
         if (transform == null) return false;
         var result = TransformControls.gizmo(transform, viewportView, viewportProjection,
-                left, top, width, height, transformMode == TransformMode.SCALE, orthographic,
+                left, top, width, height, transformMode, orthographic,
                 enabled || ImGuizmo.isUsing());
         if (!result.transform().equals(transform)) {
             world.add(selected, result.transform());
@@ -661,16 +664,6 @@ public final class EditorShell implements DesktopApplication {
 
     private enum SceneViewMode {
         THREE_D, TWO_D
-    }
-
-    private enum TransformMode {
-        TRANSLATE("Move"), SCALE("Scale");
-
-        private final String label;
-
-        TransformMode(String label) {
-            this.label = label;
-        }
     }
 
     private void drawAssets() {
